@@ -5,7 +5,8 @@ permissions:
 
 on:
   push:
-    branches: [ ${{ github.event.repository.default_branch }} ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
