@@ -1,0 +1,39 @@
+{
+  "name": "sleepnumber-stats",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --experimental-transform-types src/index.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "description": "",
+  "type": "module",
+  "devDependencies": {
+    "@eslint/compat": "^1.3.1",
+    "@eslint/js": "^9.30.1",
+    "@stylistic/eslint-plugin": "^3.1.0",
+    "@tsconfig/node-ts": "^23.6.1",
+    "@tsconfig/node22": "^22.0.2",
+    "@tsconfig/strictest": "^2.0.5",
+    "@types/node": "^22.16.0",
+    "eslint": "^9.30.1",
+    "eslint-config-airbnb-extended": "^2.1.2",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.1",
+    "eslint-plugin-n": "^17.21.0",
+    "eslint-plugin-prettier": "^5.5.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.36.0"
+  },
+  "dependencies": {
+    "@influxdata/influxdb-client": "^1.35.0",
+    "@influxdata/influxdb-client-apis": "^1.35.0",
+    "dotenv": "^17.1.0",
+    "ky": "^1.8.1",
+    "pino": "^9.7.0"
+  }
+}
