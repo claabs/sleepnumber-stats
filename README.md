@@ -44,7 +44,7 @@ services:
 ```
 
 ## Scheduling & Timezone
-This container uses cron to schedule the program to run once a day at 10:15 AM according to the timezone set by the `TZ` environment variable. The app also runs immediately at container startup, then continues to run daily at the scheduled time.
+This container uses cron to schedule the program to run once a day at 10:15 AM according to the timezone set by the `TZ` environment variable.
 
 - **TZ**: Set this to your desired timezone (e.g., `America/New_York`, `UTC`, `Europe/London`).
 - The default is UTC if not set.

@@ -17,7 +17,7 @@ USER node
 RUN echo "15 10 * * * node --experimental-transform-types /app/src/index.ts" >> /home/node/crontab
 
 # Set NODE_ENV to production
-ENV NODE_ENV=production
+ENV NODE_ENV=production CONFIG_PATH=/app/config
 
 # Start crond in foreground
 CMD ["supercronic", "-no-reap", "-passthrough-logs", "/home/node/crontab"]

@@ -31,7 +31,7 @@ export class SleepNumberAPI {
 
   private tokenExpiry = 0;
 
-  private tokensFile = path.resolve('./config/tokens.json');
+  private tokensFile = path.resolve(process.env.CONFIG_PATH ?? './config', 'tokens.json');
 
   private ky: KyInstance;
 
@@ -105,6 +105,7 @@ export class SleepNumberAPI {
       { expiresIn: data.ExpiresIn, tokenExpiry: this.tokenExpiry },
       'Access token received',
     );
+    logger.trace({ fullTokenResponse: data }, 'Full token response received');
     await this.saveRefreshToken(data.RefreshToken);
   }
 
