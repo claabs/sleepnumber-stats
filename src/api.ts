@@ -93,19 +93,18 @@ export class SleepNumberAPI {
       Password: this.password,
     };
     logger.debug({ url, email: this.email }, 'Requesting new tokens');
-    const response = await this.ky.post<CognitoLoginData>(url, {
+    const response = await this.ky.post<{ data: CognitoLoginData }>(url, {
       json: payload,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     });
 
-    const data = await response.json();
+    const { data } = await response.json();
     this.accessToken = data.AccessToken;
     this.tokenExpiry = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
     logger.info(
       { expiresIn: data.ExpiresIn, tokenExpiry: this.tokenExpiry },
       'Access token received',
     );
-    logger.trace({ fullTokenResponse: data }, 'Full token response received');
     await this.saveRefreshToken(data.RefreshToken);
   }
 
