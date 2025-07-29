@@ -8,7 +8,7 @@ import { logger } from './logger.ts';
 
 import type { KyInstance, Options, ResponsePromise } from 'ky';
 
-import type { CognitoLoginData } from './models/auth/cognito.model.ts';
+import type { CognitoLoginData, CognitoQuery } from './models/auth/cognito.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { SleeperEntity } from './models/sleeper/sleeper.model.ts';
 
@@ -93,7 +93,7 @@ export class SleepNumberAPI {
       Password: this.password,
     };
     logger.debug({ url, email: this.email }, 'Requesting new tokens');
-    const response = await this.ky.post<{ data: CognitoLoginData }>(url, {
+    const response = await this.ky.post<CognitoQuery<CognitoLoginData>>(url, {
       json: payload,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     });
@@ -116,7 +116,7 @@ export class SleepNumberAPI {
       RefreshToken: refreshToken,
     };
     logger.debug({ url, email: this.email }, 'Requesting new tokens with refresh token');
-    const response = await this.ky.put<{ data: CognitoLoginData }>(url, {
+    const response = await this.ky.put<CognitoQuery<CognitoLoginData>>(url, {
       json: payload,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     });
