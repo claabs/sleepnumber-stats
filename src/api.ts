@@ -4,11 +4,13 @@ import path from 'node:path';
 
 import ky from 'ky';
 
+import { configPath } from './config.ts';
 import { logger } from './logger.ts';
 
 import type { KyInstance, Options, ResponsePromise } from 'ky';
 
 import type { CognitoLoginData, CognitoQuery } from './models/auth/cognito.model.ts';
+import type { BedEntity } from './models/bed/bed.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { SleeperEntity } from './models/sleeper/sleeper.model.ts';
 
@@ -31,7 +33,7 @@ export class SleepNumberAPI {
 
   private tokenExpiry = 0;
 
-  private tokensFile = path.resolve(process.env.CONFIG_PATH ?? './config', 'tokens.json');
+  private tokensFile = path.resolve(configPath, 'tokens.json');
 
   private ky: KyInstance;
 
@@ -199,6 +201,24 @@ export class SleepNumberAPI {
     };
     logger.debug({ url, headers }, 'Sleeper profile request');
     const response = await this.ky.get<SleeperEntity>(url, { headers });
+    return response.json();
+  }
+
+  async getBed(): Promise<BedEntity> {
+    logger.info('Fetching beds');
+    await this.ensureValidToken();
+    const url = 'https://prod-api.sleepiq.sleepnumber.com/rest/bed';
+    const headers = {
+      Accept: 'application/json, text/plain, */*',
+      Authorization: this.accessToken,
+      'X-App-Version': API_VERSION,
+      'Accept-Version': API_VERSION,
+      'X-App-Platform': 'web',
+      Origin: 'https://sleepiq.sleepnumber.com',
+      Referer: 'https://sleepiq.sleepnumber.com/',
+    };
+    logger.debug({ url, headers }, 'Bed request');
+    const response = await this.ky.get<BedEntity>(url, { headers });
     return response.json();
   }
 }

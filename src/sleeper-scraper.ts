@@ -1,30 +1,72 @@
 /* eslint-disable no-underscore-dangle */
 /* eslint-disable no-await-in-loop */
+import { TZDate } from '@date-fns/tz';
 import { Point } from '@influxdata/influxdb-client';
+import { addDays, addSeconds, differenceInDays, format, startOfMonth, subMonths } from 'date-fns';
 
+import { config } from './config.ts';
+import HealthConnectGateway from './health-connect-gateway.ts';
 import { logger } from './logger.ts';
+import {
+  DeviceType,
+  RecordingMethod,
+  SleepStageType,
+} from './models/sleep-session/sleep-session-record.ts';
 
 import type { QueryApi } from '@influxdata/influxdb-client';
 
 import type { SleepNumberAPI } from './api.ts';
+import type { HealthConnectUser } from './config.ts';
+import type { Bed } from './models/bed/bed.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
+import type {
+  SleepSessionRecord,
+  SleepStage,
+} from './models/sleep-session/sleep-session-record.ts';
 import type { Sleeper } from './models/sleeper/sleeper.model.ts';
 
-const toLocalDateString = (date: Date): string => {
-  return `${date.getFullYear().toString().padStart(4, '0')}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
-};
+export interface SleeperScraperProps {
+  api: SleepNumberAPI;
+  beds: Bed[];
+  sleeper: Sleeper;
+  influxQueryApi: QueryApi;
+  healthConnectUser?: HealthConnectUser;
+}
 
 export class SleeperScraper {
   private api: SleepNumberAPI;
 
   private sleeper: Sleeper;
 
+  private timezone: string;
+
   private influxQueryApi: QueryApi;
 
-  constructor(api: SleepNumberAPI, sleeper: Sleeper, influxQueryApi: QueryApi) {
-    this.api = api;
-    this.sleeper = sleeper;
-    this.influxQueryApi = influxQueryApi;
+  private healthConnectGateway?: HealthConnectGateway;
+
+  constructor(props: SleeperScraperProps) {
+    this.api = props.api;
+    this.sleeper = props.sleeper;
+    this.influxQueryApi = props.influxQueryApi;
+
+    const bed = props.beds.find(
+      (b) =>
+        b.sleeperLeftId === this.sleeper.sleeperId || b.sleeperRightId === this.sleeper.sleeperId,
+    );
+    this.timezone = bed?.timezone ?? config.tz;
+
+    if (!(props.healthConnectUser?.username && props.healthConnectUser?.password)) {
+      logger.warn(
+        { sleeperId: this.sleeper.sleeperId },
+        'Health Connect credentials not configured, skipping Health Connect Gateway',
+      );
+    } else {
+      this.healthConnectGateway = new HealthConnectGateway({
+        username: props.healthConnectUser.username,
+        password: props.healthConnectUser.password,
+      });
+    }
+
     logger.debug({ sleeperId: this.sleeper.sleeperId }, 'SleeperScraper initialized');
   }
 
@@ -33,14 +75,12 @@ export class SleeperScraper {
     return (
       sleepDataStruct.sleepData
         .map((sleepDataDay) => {
-          const longestSession = sleepDataDay.sessions.find((session) => session.longest);
+          const longestSession = sleepDataDay.sessions.find(
+            (session) => session.longest && session.isFinalized,
+          );
           if (longestSession) {
-            logger.debug(
-              { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
-              'Creating point for session',
-            );
             const point = new Point('sleep_data')
-              .timestamp(new Date(longestSession.endDate))
+              .timestamp(new TZDate(longestSession.endDate, this.timezone))
               .tag('sleeper_id', this.sleeper.sleeperId)
               .tag('sleeper_name', this.sleeper.firstName)
               .intField('heart_rate', longestSession.avgHeartRate)
@@ -63,15 +103,96 @@ export class SleeperScraper {
     );
   }
 
+  private createSleepSessions(sleepData: SleepDataStructure): SleepSessionRecord[] {
+    logger.trace({ days: sleepData.sleepData.length }, 'Creating sleep sessions from sleep data');
+    return sleepData.sleepData
+      .map((sleepDataDay) => {
+        const longestSession = sleepDataDay.sessions.find(
+          (session) => session.longest && session.isFinalized,
+        );
+        if (!longestSession) return null;
+        const sessionStartDate = new TZDate(longestSession.startDate, this.timezone);
+        const sessionEndDate = new TZDate(longestSession.endDate, this.timezone);
+        // Only include sessions within the last 30 days
+        if (differenceInDays(new Date(), sessionEndDate) > 30) return null;
+
+        logger.debug(
+          { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
+          'Creating sleep session record',
+        );
+        const stageFields: { value: number; stage: SleepStageType }[] = [
+          {
+            value: longestSession.outOfBed,
+            stage: SleepStageType.SLEEP_STAGE_TYPE_OUT_OF_BED,
+          },
+          {
+            value: longestSession.fallAsleepPeriod,
+            stage: SleepStageType.STAGE_TYPE_AWAKE_IN_BED,
+          },
+          {
+            value: longestSession.restless,
+            stage: SleepStageType.SLEEP_STAGE_TYPE_LIGHT,
+          },
+          {
+            value: longestSession.restful,
+            stage: SleepStageType.SLEEP_STAGE_TYPE_DEEP,
+          },
+        ];
+        let stageTime = new TZDate(longestSession.startDate, this.timezone);
+        const stages: SleepStage[] = stageFields
+          .filter((field) => field.value > 0)
+          .map((field) => {
+            const endTime = addSeconds(new TZDate(stageTime, this.timezone), field.value);
+            const stage: SleepStage = {
+              stage: field.stage,
+              startTime: new TZDate(stageTime, 'UTC').toISOString(),
+              endTime: new TZDate(endTime, 'UTC').toISOString(),
+            };
+            stageTime = endTime;
+            return stage;
+          });
+        const sleepSession: SleepSessionRecord = {
+          startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
+          endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
+          stages,
+          metadata: {
+            clientRecordVersion: 1,
+            clientRecordId: longestSession.startDate,
+            recordingMethod: RecordingMethod.RECORDING_METHOD_AUTOMATICALLY_RECORDED,
+            dataOrigin: 'com.sleepnumber.stats',
+            device: {
+              type: DeviceType.TYPE_UNKNOWN,
+              manufacturer: 'Sleep Number',
+              model: 'SleepIQ',
+            },
+          },
+        };
+        return sleepSession;
+      })
+      .filter((session) => session !== null);
+  }
+
+  private async publishSleepSessions(sleepSessions: SleepSessionRecord[]): Promise<void> {
+    if (!this.healthConnectGateway) return;
+    if (!sleepSessions.length) return;
+
+    logger.debug({ count: sleepSessions.length }, 'Publishing sleep sessions');
+    await this.healthConnectGateway.push('sleepSession', {
+      data: sleepSessions,
+    });
+    logger.info(
+      { count: sleepSessions.length },
+      'Successfully published HealthConnect session batch',
+    );
+  }
+
   async getHistoricalData(): Promise<Point[]> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Fetching historical sleep data');
     const historicalPoints: Point[] = [];
-    const currentDate = new Date();
-    currentDate.setDate(1);
-    currentDate.setHours(0, 0, 0, 1);
+    let currentDate = startOfMonth(new TZDate(new Date(), this.timezone));
 
     while (true) {
-      const dateString = toLocalDateString(currentDate);
+      const dateString = format(currentDate, 'yyyy-MM-dd');
       logger.trace({ date: dateString }, 'Requesting monthly sleep data');
       const sleepDataResp = await this.api.getSleepData(
         dateString,
@@ -80,15 +201,13 @@ export class SleeperScraper {
         false,
       );
       const points = this.createPoints(sleepDataResp);
+      await this.publishSleepSessions(this.createSleepSessions(sleepDataResp));
       if (!points.length) {
         logger.info('No more historical points found');
         break;
       }
       historicalPoints.push(...points);
-      // Go to the last day of the previous month
-      currentDate.setDate(0);
-      // Go to the first day of the month
-      currentDate.setDate(1);
+      currentDate = subMonths(currentDate, 1);
     }
     logger.info({ count: historicalPoints.length }, 'Historical points fetched');
     return historicalPoints;
@@ -97,10 +216,10 @@ export class SleeperScraper {
   async getDailyData(startDate: Date): Promise<Point[]> {
     logger.info({ sleeperId: this.sleeper.sleeperId, startDate }, 'Fetching daily sleep data');
     const dailyPoints: Point[] = [];
-    const today = new Date();
-    const date = new Date(startDate);
+    const today = new TZDate(new Date(), this.timezone);
+    let date = new TZDate(startDate, this.timezone);
     while (date <= today) {
-      const dateString = toLocalDateString(date);
+      const dateString = format(date, 'yyyy-MM-dd');
       logger.trace({ date: dateString }, 'Requesting daily sleep data');
       const sleepDataResp = await this.api.getSleepData(
         dateString,
@@ -109,8 +228,9 @@ export class SleeperScraper {
         false,
       );
       const points = this.createPoints(sleepDataResp);
+      await this.publishSleepSessions(this.createSleepSessions(sleepDataResp));
       dailyPoints.push(...points);
-      date.setDate(date.getDate() + 1);
+      date = addDays(date, 1);
     }
     logger.info({ count: dailyPoints.length }, 'Daily points fetched');
     return dailyPoints;
@@ -118,12 +238,7 @@ export class SleeperScraper {
 
   async scrapeSleeperData(): Promise<Point[]> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Scraping sleeper data');
-    const bucket = process.env.INFLUXDB_BUCKET;
-    const org = process.env.INFLUXDB_ORG;
-    if (!bucket || !org) {
-      logger.error('InfluxDB bucket or org not configured');
-      throw new Error('InfluxDB bucket or org not configured');
-    }
+    const bucket = config.influxdbBucket;
     const query = `from(bucket: "${bucket}") |> range(start: -1y) |> filter(fn: (r) => r._measurement == "sleep_data" and r.sleeper_id == "${this.sleeper.sleeperId}") |> sort(columns: ["_time"], desc: true) |> limit(n: 1)`;
 
     let lastDate: Date | undefined;
@@ -147,8 +262,7 @@ export class SleeperScraper {
     });
 
     if (lastDate) {
-      const startDate = new Date(lastDate.getTime());
-      startDate.setDate(startDate.getDate() + 1);
+      const startDate = addDays(new TZDate(lastDate, this.timezone), 1);
       logger.info({ startDate }, 'Fetching daily data since last date');
       return this.getDailyData(startDate);
     }
