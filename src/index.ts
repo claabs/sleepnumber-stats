@@ -29,6 +29,7 @@ async function main() {
       );
       const deleteApi = new DeleteAPI(influxDbClient);
       const start = '1970-01-01T00:00:00Z';
+      // const start = subDays(new Date(), 1).toISOString();
       const stop = new Date().toISOString();
       await deleteApi.postDelete({
         org: config.influxdbOrg,

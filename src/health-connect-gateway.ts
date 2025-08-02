@@ -23,7 +23,13 @@ export interface PushParameters {
   data: object[];
 }
 
+export interface FetchParameters {
+  queries: object;
+}
+
 class HealthConnectGateway {
+  private tokenValidated?: string;
+
   private baseUrl = 'https://api.hcgateway.shuchir.dev';
 
   private tokensFile = path.resolve('./config/tokens.json');
@@ -54,6 +60,23 @@ class HealthConnectGateway {
       }
     } catch {
       // No tokens file yet
+    }
+  }
+
+  private async validateToken(): Promise<boolean> {
+    try {
+      const url = `${this.baseUrl}/api/v2/fetch/sleepSession`;
+      await ky.post(url, {
+        json: { queries: {} },
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+      this.tokenValidated = this.token;
+      return true;
+    } catch (error) {
+      if (error instanceof HTTPError && error.response.status === 403) {
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -100,6 +123,18 @@ class HealthConnectGateway {
         await this.login();
       }
     }
+    if (this.token && this.tokenValidated !== this.token) {
+      if (await this.validateToken()) return;
+      // Try refresh
+      if (this.refreshToken) {
+        await this.refresh();
+        if (await this.validateToken()) return;
+      }
+      // Try login
+      await this.login();
+      if (await this.validateToken()) return;
+      throw new Error('Unable to validate token after refresh and login');
+    }
   }
 
   public async push(method: string, params: PushParameters): Promise<void> {
@@ -114,7 +149,7 @@ class HealthConnectGateway {
         // eslint-disable-next-line no-await-in-loop
         const resp = await ky.put(url, {
           json: { ...params, data: chunk },
-          headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${this.token}` },
         });
         // eslint-disable-next-line no-await-in-loop
         const responseData = await resp.json();
