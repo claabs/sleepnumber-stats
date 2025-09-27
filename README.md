@@ -89,7 +89,7 @@ To enable the Fitbit reporting of sleep data to your Fitbit account (for syncing
 1. Setup an HTTPS domain reverse proxied to your container
 1. Create a Fitbit developer application:
     1. Create an app [on the Fitbit dev portal](https://dev.fitbit.com/apps/new)
-    1. Set **OAuth 2.0 Application Type** to `Personal` if only you are using it, or `Server` if other accounts will connect
+    1. Set **OAuth 2.0 Application Type** to `Personal` if only you are using it, or `Server` if accounts other than the developer's account will connect
     1. Set **Redirect URL** to your HTTPS URL set in the config `fitbitBaseUrl`
     1. Set **Default Access Type** to `Read & Write`
 1. Add the Fitbit options to your config:
@@ -103,8 +103,14 @@ To enable the Fitbit reporting of sleep data to your Fitbit account (for syncing
     }
     ```
 
-1. Open a terminal inside your running container and run `./setup.sh`
+1. Open a terminal inside your running container and run `./setup.sh`:
+
+    ```sh
+    docker exec -it sleepnumber-stats sh
+    ./setup.sh
+    ```
+
 1. Navigate to `/register` (e.g. `https://sleep.example.com/register`)
 1. Click the sleeper you'd like to associate with your Fitbit account and follow the Fitbit linking steps
 1. CTRL-C in the terminal to exit the setup application
-1. The Fitbit data will be uploaded on your next scheduled run
+1. The Fitbit data will be uploaded on your next scheduled run. You should see your Fitbit refresh token in `/app/config/tokens.json`.
