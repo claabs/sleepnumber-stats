@@ -16,7 +16,7 @@ import { Fitbit } from './fitbit.ts';
 import { logger } from './logger.ts';
 import { getFitbitRefreshToken } from './token-store.ts';
 
-import type { QueryApi } from '@influxdata/influxdb-client';
+import type { QueryApi, WriteApi } from '@influxdata/influxdb-client';
 
 import type { SleepLogParams } from './fitbit.ts';
 import type { Bed } from './models/bed/bed.model.ts';
@@ -29,6 +29,12 @@ export interface SleeperScraperProps {
   beds: Bed[];
   sleeper: Sleeper;
   influxQueryApi: QueryApi;
+  influxWriteApi: WriteApi;
+}
+
+interface ScrapedSessions {
+  influxPoints: Point[];
+  fitbitSleepLogs: SleepLogParams[];
 }
 
 export class SleeperScraper {
@@ -40,12 +46,15 @@ export class SleeperScraper {
 
   private influxQueryApi: QueryApi;
 
+  private influxWriteApi: WriteApi;
+
   private fitbitApi?: Fitbit;
 
   constructor(props: SleeperScraperProps) {
     this.api = props.api;
     this.sleeper = props.sleeper;
     this.influxQueryApi = props.influxQueryApi;
+    this.influxWriteApi = props.influxWriteApi;
 
     const bed = props.beds.find(
       (b) =>
@@ -125,7 +134,7 @@ export class SleeperScraper {
     logger.info({ count: sleepLogs.length }, 'Successfully published Fitbit sleep log batch');
   }
 
-  async getHistoricalData(): Promise<Point[]> {
+  async getHistoricalData(): Promise<ScrapedSessions> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Fetching historical sleep data');
     const historicalPoints: Point[] = [];
     const sleepLogParams: SleepLogParams[] = [];
@@ -150,13 +159,14 @@ export class SleeperScraper {
       currentDate = subMonths(currentDate, 1);
     }
     logger.info({ count: historicalPoints.length }, 'Historical points fetched');
-    await this.publishSleepSessions(sleepLogParams);
-    return historicalPoints;
+
+    return { influxPoints: historicalPoints, fitbitSleepLogs: sleepLogParams };
   }
 
-  async getDailyData(startDate: Date): Promise<Point[]> {
+  async getDailyData(startDate: Date): Promise<ScrapedSessions> {
     logger.info({ sleeperId: this.sleeper.sleeperId, startDate }, 'Fetching daily sleep data');
     const dailyPoints: Point[] = [];
+    const sleepLogParams: SleepLogParams[] = [];
     const today = new TZDate(new Date(), this.timezone);
     let date = new TZDate(startDate, this.timezone);
     while (date <= today) {
@@ -169,15 +179,15 @@ export class SleeperScraper {
         false,
       );
       const points = this.createPoints(sleepDataResp);
-      await this.publishSleepSessions(this.createSleepParams(sleepDataResp));
+      sleepLogParams.push(...this.createSleepParams(sleepDataResp));
       dailyPoints.push(...points);
       date = addDays(date, 1);
     }
     logger.info({ count: dailyPoints.length }, 'Daily points fetched');
-    return dailyPoints;
+    return { influxPoints: dailyPoints, fitbitSleepLogs: sleepLogParams };
   }
 
-  async scrapeSleeperData(): Promise<Point[]> {
+  async scrapeSleeperData(): Promise<void> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Scraping sleeper data');
 
     const fitbitRefreshToken = await getFitbitRefreshToken(this.sleeper.sleeperId);
@@ -213,12 +223,21 @@ export class SleeperScraper {
       });
     });
 
+    let scrapedSessions: ScrapedSessions;
     if (lastDate) {
       const startDate = addDays(new TZDate(lastDate, this.timezone), 1);
       logger.info({ startDate }, 'Fetching daily data since last date');
-      return this.getDailyData(startDate);
+      scrapedSessions = await this.getDailyData(startDate);
+    } else {
+      logger.info('No previous data found, fetching historical data');
+      scrapedSessions = await this.getHistoricalData();
     }
-    logger.info('No previous data found, fetching historical data');
-    return this.getHistoricalData();
+
+    logger.info(
+      { count: scrapedSessions.influxPoints.length, sleeperId: this.sleeper.sleeperId },
+      'Points scraped. Writing to InfluxDB...',
+    );
+    this.influxWriteApi.writePoints(scrapedSessions.influxPoints);
+    await this.publishSleepSessions(scrapedSessions.fitbitSleepLogs);
   }
 }

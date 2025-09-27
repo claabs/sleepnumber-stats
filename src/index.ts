@@ -56,13 +56,10 @@ async function main() {
         sleeper,
         influxQueryApi: queryApi,
         beds,
+        influxWriteApi: writeApi,
       });
-
-      const points = await sleeperScraper.scrapeSleeperData();
-      logger.info({ count: points.length, sleeperId: sleeper.sleeperId }, 'Points scraped');
-      // Write points to InfluxDB
-
-      writeApi.writePoints(points);
+      await sleeperScraper.scrapeSleeperData();
+      logger.info({ sleeperId: sleeper.sleeperId }, 'Scrape complete');
     }
     await writeApi.close();
     logger.info('All points written to InfluxDB');
