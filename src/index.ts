@@ -4,16 +4,12 @@ import { InfluxDB } from '@influxdata/influxdb-client';
 import { DeleteAPI } from '@influxdata/influxdb-client-apis';
 import 'dotenv/config';
 
-import { SleepNumberAPI } from './api.ts';
 import { config } from './config.ts';
 import { logger } from './logger.ts';
 import { SleeperScraper } from './sleeper-scraper.ts';
-
-import type { HealthConnectUser } from './config.ts';
+import { SleepNumberAPI } from './sleepnumber-api.ts';
 
 async function main() {
-  const clientId = '2oa5825venq9kek1dnrhfp7rdh';
-
   try {
     logger.info('Starting SleepNumber stats ingestion');
     const influxDbClient = new InfluxDB({
@@ -42,7 +38,6 @@ async function main() {
       logger.info({ bucket: config.influxdbBucket }, 'All data deleted from InfluxDB bucket');
     }
     const api = new SleepNumberAPI({
-      clientId,
       email: config.sleepNumberEmail,
       password: config.sleepNumberPassword,
     });
@@ -55,14 +50,12 @@ async function main() {
     // eslint-disable-next-line no-restricted-syntax
     for (const sleeper of sleeperResp.sleepers) {
       logger.info({ sleeperId: sleeper.sleeperId, name: sleeper.firstName }, 'Processing sleeper');
-      const healthConnectUser: HealthConnectUser | undefined =
-        config.healthConnect?.[sleeper.sleeperId];
+
       const sleeperScraper = new SleeperScraper({
         api,
         sleeper,
         influxQueryApi: queryApi,
         beds,
-        healthConnectUser,
       });
 
       const points = await sleeperScraper.scrapeSleeperData();

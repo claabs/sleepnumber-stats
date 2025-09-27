@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node --experimental-transform-types src/index.ts",
-    "docker:run": "docker run --rm -ti --init -v $(pwd)/config:/app/config --env-file .env sleepnumber-stats",
+    "docker:run": "docker run --rm -ti --init -v $(pwd)/config:/app/config -p 3000:3000 --env-file .env sleepnumber-stats",
     "docker:build": "docker build -t sleepnumber-stats ."
   },
   "author": "",
@@ -33,10 +33,12 @@
   },
   "dependencies": {
     "@date-fns/tz": "^1.2.0",
+    "@hono/node-server": "^1.19.4",
     "@influxdata/influxdb-client": "^1.35.0",
     "@influxdata/influxdb-client-apis": "^1.35.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.1.0",
+    "hono": "^4.9.8",
     "ky": "^1.8.1",
     "pino": "^9.7.0",
     "zod": "^4.0.14"

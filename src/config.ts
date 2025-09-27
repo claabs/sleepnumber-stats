@@ -3,13 +3,6 @@ import path from 'node:path';
 
 import z from 'zod';
 
-export const HealthConnectUser = z.object({
-  username: z.string(),
-  password: z.string().min(1),
-});
-
-export type HealthConnectUser = z.infer<typeof HealthConnectUser>;
-
 export const SleepConfig = z.object({
   sleepNumberEmail: z.email(),
   sleepNumberPassword: z.string().min(1),
@@ -19,8 +12,11 @@ export const SleepConfig = z.object({
   influxdbBucket: z.string().min(1),
   emptyBucket: z.boolean().default(false),
   tz: z.string().default(process.env.TZ ?? 'UTC'),
-  healthConnect: z.record(z.string().min(1), HealthConnectUser).optional(),
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
+  fitbitRedirectUri: z.url().optional(),
+  fitbitClientId: z.string().optional(),
+  fitbitClientSecret: z.string().optional(),
+  port: z.number().min(1).max(65535).default(3000),
 });
 
 export type SleepConfig = z.infer<typeof SleepConfig>;
