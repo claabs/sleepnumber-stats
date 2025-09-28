@@ -1,6 +1,5 @@
 # SleepNumber Stats
 
-
 A Node.js/TypeScript application for collecting and storing SleepNumber bed statistics in InfluxDB and sending data to Android Health Connect.
 
 ## Features
@@ -9,7 +8,6 @@ A Node.js/TypeScript application for collecting and storing SleepNumber bed stat
 - Stores data in InfluxDB
 - Optionally sends sleep sessions to Android Health Connect
 
-
 ## Quick Start (Docker)
 
 ### Docker Run Example
@@ -17,6 +15,7 @@ A Node.js/TypeScript application for collecting and storing SleepNumber bed stat
 ```sh
 docker run --rm --init \
   -v $(pwd)/config:/app/config \
+  -p 3000:3000 \
   -e TZ=America/New_York \
   -e CONFIG_PATH=/app/config \
   ghcr.io/claabs/sleepnumber-stats
@@ -31,6 +30,8 @@ services:
     init: true
     environment:
       TZ: "America/New_York"
+    ports:
+      - 3000:3000 # optional, for Fitbit setup
     volumes:
       - ./config:/app/config
     restart: unless-stopped
@@ -49,18 +50,21 @@ All application configuration is provided via a `config.json` file. The optional
 
 ### Configuration Reference
 
-| Key                 | Description                                           | Default    | Example                |
-|---------------------|-------------------------------------------------------|------------|------------------------|
-| sleepNumberEmail    | SleepNumber account email                             | (required) | "your@email.com"       |
-| sleepNumberPassword | SleepNumber account password                          | (required) | "yourpassword"         |
-| influxdbUrl         | InfluxDB server URL                                   | (required) | "http://influxdb:8086" |
-| influxdbToken       | InfluxDB API token                                    | (required) | "your-influxdb-token"  |
-| influxdbOrg         | InfluxDB organization name                            | (required) | "your-org"             |
-| influxdbBucket      | InfluxDB bucket name                                  | (required) | "your-bucket"          |
-| emptyBucket         | If true, deletes all data in the bucket before ingest | false      | false                  |
-| tz                  | Timezone for scheduling                               | "UTC"      | "America/New_York"     |
-| logLevel            | Pino logger level (trace, debug, info, etc.)          | "info"     | "debug"                |
-| healthConnect       | Health Connect user map (see below)                   | (optional) | {"user1": {...}}       |
+| Key                 | Description                                           | Default    | Example                              |
+|---------------------|-------------------------------------------------------|------------|--------------------------------------|
+| sleepNumberEmail    | SleepNumber account email                             | (required) | "your@email.com"                     |
+| sleepNumberPassword | SleepNumber account password                          | (required) | "yourpassword"                       |
+| influxdbUrl         | InfluxDB server URL                                   | (required) | "http://influxdb:8086"               |
+| influxdbToken       | InfluxDB API token                                    | (required) | "your-influxdb-token"                |
+| influxdbOrg         | InfluxDB organization name                            | (required) | "your-org"                           |
+| influxdbBucket      | InfluxDB bucket name                                  | (required) | "your-bucket"                        |
+| emptyBucket         | If true, deletes all data in the bucket before ingest | false      | false                                |
+| tz                  | Timezone for scheduling                               | "UTC"      | "America/New_York"                   |
+| logLevel            | Pino logger level (trace, debug, info, etc.)          | "info"     | "debug"                              |
+| fitbitBaseUrl       | Public HTTPS callback URL for Fitbit OAuth2           | (optional) | "https://sleep.example.com/callback" |
+| fitbitClientId      | Fitbit developer app client ID                        | (optional) | "12ABCD"                             |
+| fitbitClientSecret  | Fitbit developer app client secret                    | (optional) | "abcdef1234567890abcdef1234567890"   |
+| port                | Port for the web server (setup/registration)          | 3000       | 3001                                 |
 
 ### Example config.json
 
@@ -78,18 +82,35 @@ All application configuration is provided via a `config.json` file. The optional
 }
 ```
 
-#### Optional: Health Connect Integration
+#### Optional: Fitbit Integration
 
-To enable Android Health Connect integration, add a `healthConnect` object to your config. The key is your sleeper ID, which can be found in the logs:
+To enable the Fitbit reporting of sleep data to your Fitbit account (for syncing to your phone):
 
-```json
-{
-  ...existing config fields...
-  "healthConnect": {
-    "-9123456789123456789": { "username": "user1", "password": "pass1" },
-  }
-}
-```
+1. Setup an HTTPS domain reverse proxied to your container
+1. Create a Fitbit developer application:
+    1. Create an app [on the Fitbit dev portal](https://dev.fitbit.com/apps/new)
+    1. Set **OAuth 2.0 Application Type** to `Personal` if only you are using it, or `Server` if accounts other than the developer's account will connect
+    1. Set **Redirect URL** to your HTTPS URL set in the config `fitbitBaseUrl`
+    1. Set **Default Access Type** to `Read & Write`
+1. Add the Fitbit options to your config:
 
-This project uses HCGateway to send data to your phone. You can find details at the [HCGateway project page](https://github.com/ShuchirJ/HCGateway). It will automatically create an account on first login, which you will use to login on the HCGateway Android app.
+    ```json
+    {
+      ...existing config fields...
+      "fitbitBaseUrl": "https://sleep.example.com/callback",
+      "fitbitClientId": "12ABCD",
+      "fitbitClientSecret": "abcdef1234567890abcdef1234567890"
+    }
+    ```
 
+1. Open a terminal inside your running container and run `./setup.sh`:
+
+    ```sh
+    docker exec -it sleepnumber-stats sh
+    ./setup.sh
+    ```
+
+1. Navigate to `/register` (e.g. `https://sleep.example.com/register`)
+1. Click the sleeper you'd like to associate with your Fitbit account and follow the Fitbit linking steps
+1. CTRL-C in the terminal to exit the setup application
+1. The Fitbit data will be uploaded on your next scheduled run. You should see your Fitbit refresh token in `/app/config/tokens.json`.

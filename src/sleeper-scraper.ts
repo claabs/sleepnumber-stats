@@ -2,35 +2,39 @@
 /* eslint-disable no-await-in-loop */
 import { TZDate } from '@date-fns/tz';
 import { Point } from '@influxdata/influxdb-client';
-import { addDays, addSeconds, differenceInDays, format, startOfMonth, subMonths } from 'date-fns';
+import {
+  addDays,
+  differenceInDays,
+  differenceInMilliseconds,
+  format,
+  startOfMonth,
+  subMonths,
+} from 'date-fns';
 
 import { config } from './config.ts';
-import HealthConnectGateway from './health-connect-gateway.ts';
+import { Fitbit } from './fitbit.ts';
 import { logger } from './logger.ts';
-import {
-  DeviceType,
-  RecordingMethod,
-  SleepStageType,
-} from './models/sleep-session/sleep-session-record.ts';
+import { getFitbitRefreshToken } from './token-store.ts';
 
-import type { QueryApi } from '@influxdata/influxdb-client';
+import type { QueryApi, WriteApi } from '@influxdata/influxdb-client';
 
-import type { SleepNumberAPI } from './api.ts';
-import type { HealthConnectUser } from './config.ts';
+import type { SleepLogParams } from './fitbit.ts';
 import type { Bed } from './models/bed/bed.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
-import type {
-  SleepSessionRecord,
-  SleepStage,
-} from './models/sleep-session/sleep-session-record.ts';
 import type { Sleeper } from './models/sleeper/sleeper.model.ts';
+import type { SleepNumberAPI } from './sleepnumber-api.ts';
 
 export interface SleeperScraperProps {
   api: SleepNumberAPI;
   beds: Bed[];
   sleeper: Sleeper;
   influxQueryApi: QueryApi;
-  healthConnectUser?: HealthConnectUser;
+  influxWriteApi: WriteApi;
+}
+
+interface ScrapedSessions {
+  influxPoints: Point[];
+  fitbitSleepLogs: SleepLogParams[];
 }
 
 export class SleeperScraper {
@@ -42,30 +46,21 @@ export class SleeperScraper {
 
   private influxQueryApi: QueryApi;
 
-  private healthConnectGateway?: HealthConnectGateway;
+  private influxWriteApi: WriteApi;
+
+  private fitbitApi?: Fitbit;
 
   constructor(props: SleeperScraperProps) {
     this.api = props.api;
     this.sleeper = props.sleeper;
     this.influxQueryApi = props.influxQueryApi;
+    this.influxWriteApi = props.influxWriteApi;
 
     const bed = props.beds.find(
       (b) =>
         b.sleeperLeftId === this.sleeper.sleeperId || b.sleeperRightId === this.sleeper.sleeperId,
     );
     this.timezone = bed?.timezone ?? config.tz;
-
-    if (!(props.healthConnectUser?.username && props.healthConnectUser?.password)) {
-      logger.warn(
-        { sleeperId: this.sleeper.sleeperId },
-        'Health Connect credentials not configured, skipping Health Connect Gateway',
-      );
-    } else {
-      this.healthConnectGateway = new HealthConnectGateway({
-        username: props.healthConnectUser.username,
-        password: props.healthConnectUser.password,
-      });
-    }
 
     logger.debug({ sleeperId: this.sleeper.sleeperId }, 'SleeperScraper initialized');
   }
@@ -103,7 +98,7 @@ export class SleeperScraper {
     );
   }
 
-  private createSleepSessions(sleepData: SleepDataStructure): SleepSessionRecord[] {
+  private createSleepParams(sleepData: SleepDataStructure): SleepLogParams[] {
     logger.trace({ days: sleepData.sleepData.length }, 'Creating sleep sessions from sleep data');
     return sleepData.sleepData
       .map((sleepDataDay) => {
@@ -118,77 +113,31 @@ export class SleeperScraper {
 
         logger.debug(
           { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
-          'Creating sleep session record',
+          'Creating sleep log record',
         );
-        const stageFields: { value: number; stage: SleepStageType }[] = [
-          {
-            value: longestSession.outOfBed,
-            stage: SleepStageType.SLEEP_STAGE_TYPE_OUT_OF_BED,
-          },
-          {
-            value: longestSession.fallAsleepPeriod,
-            stage: SleepStageType.STAGE_TYPE_AWAKE_IN_BED,
-          },
-          {
-            value: longestSession.restless,
-            stage: SleepStageType.SLEEP_STAGE_TYPE_LIGHT,
-          },
-          {
-            value: longestSession.restful,
-            stage: SleepStageType.SLEEP_STAGE_TYPE_DEEP,
-          },
-        ];
-        let stageTime = new TZDate(longestSession.startDate, this.timezone);
-        const stages: SleepStage[] = stageFields
-          .filter((field) => field.value > 0)
-          .map((field) => {
-            const endTime = addSeconds(new TZDate(stageTime, this.timezone), field.value);
-            const stage: SleepStage = {
-              stage: field.stage,
-              startTime: new TZDate(stageTime, 'UTC').toISOString(),
-              endTime: new TZDate(endTime, 'UTC').toISOString(),
-            };
-            stageTime = endTime;
-            return stage;
-          });
-        const sleepSession: SleepSessionRecord = {
-          startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
-          endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
-          stages,
-          metadata: {
-            clientRecordVersion: 1,
-            clientRecordId: longestSession.startDate,
-            recordingMethod: RecordingMethod.RECORDING_METHOD_AUTOMATICALLY_RECORDED,
-            dataOrigin: 'com.sleepnumber.stats',
-            device: {
-              type: DeviceType.TYPE_UNKNOWN,
-              manufacturer: 'Sleep Number',
-              model: 'SleepIQ',
-            },
-          },
+        const sleepLog: SleepLogParams = {
+          startTime: format(sessionStartDate, 'HH:mm'),
+          date: format(sessionStartDate, 'yyyy-MM-dd'),
+          duration: differenceInMilliseconds(sessionEndDate, sessionStartDate),
         };
-        return sleepSession;
+        return sleepLog;
       })
       .filter((session) => session !== null);
   }
 
-  private async publishSleepSessions(sleepSessions: SleepSessionRecord[]): Promise<void> {
-    if (!this.healthConnectGateway) return;
-    if (!sleepSessions.length) return;
+  private async publishSleepSessions(sleepLogs: SleepLogParams[]): Promise<void> {
+    if (!this.fitbitApi) return;
+    if (!sleepLogs.length) return;
 
-    logger.debug({ count: sleepSessions.length }, 'Publishing sleep sessions');
-    await this.healthConnectGateway.push('sleepSession', {
-      data: sleepSessions,
-    });
-    logger.info(
-      { count: sleepSessions.length },
-      'Successfully published HealthConnect session batch',
-    );
+    logger.debug({ count: sleepLogs.length }, 'Publishing sleep sessions to Fitbit');
+    await this.fitbitApi.createSleepLogs(sleepLogs);
+    logger.info({ count: sleepLogs.length }, 'Successfully published Fitbit sleep log batch');
   }
 
-  async getHistoricalData(): Promise<Point[]> {
+  async getHistoricalData(): Promise<ScrapedSessions> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Fetching historical sleep data');
     const historicalPoints: Point[] = [];
+    const sleepLogParams: SleepLogParams[] = [];
     let currentDate = startOfMonth(new TZDate(new Date(), this.timezone));
 
     while (true) {
@@ -200,8 +149,8 @@ export class SleeperScraper {
         this.sleeper.sleeperId,
         false,
       );
+      sleepLogParams.push(...this.createSleepParams(sleepDataResp));
       const points = this.createPoints(sleepDataResp);
-      await this.publishSleepSessions(this.createSleepSessions(sleepDataResp));
       if (!points.length) {
         logger.info('No more historical points found');
         break;
@@ -210,12 +159,14 @@ export class SleeperScraper {
       currentDate = subMonths(currentDate, 1);
     }
     logger.info({ count: historicalPoints.length }, 'Historical points fetched');
-    return historicalPoints;
+
+    return { influxPoints: historicalPoints, fitbitSleepLogs: sleepLogParams };
   }
 
-  async getDailyData(startDate: Date): Promise<Point[]> {
+  async getDailyData(startDate: Date): Promise<ScrapedSessions> {
     logger.info({ sleeperId: this.sleeper.sleeperId, startDate }, 'Fetching daily sleep data');
     const dailyPoints: Point[] = [];
+    const sleepLogParams: SleepLogParams[] = [];
     const today = new TZDate(new Date(), this.timezone);
     let date = new TZDate(startDate, this.timezone);
     while (date <= today) {
@@ -228,16 +179,27 @@ export class SleeperScraper {
         false,
       );
       const points = this.createPoints(sleepDataResp);
-      await this.publishSleepSessions(this.createSleepSessions(sleepDataResp));
+      sleepLogParams.push(...this.createSleepParams(sleepDataResp));
       dailyPoints.push(...points);
       date = addDays(date, 1);
     }
     logger.info({ count: dailyPoints.length }, 'Daily points fetched');
-    return dailyPoints;
+    return { influxPoints: dailyPoints, fitbitSleepLogs: sleepLogParams };
   }
 
-  async scrapeSleeperData(): Promise<Point[]> {
+  async scrapeSleeperData(): Promise<void> {
     logger.info({ sleeperId: this.sleeper.sleeperId }, 'Scraping sleeper data');
+
+    const fitbitRefreshToken = await getFitbitRefreshToken(this.sleeper.sleeperId);
+    if (config.fitbitClientId && config.fitbitClientSecret && fitbitRefreshToken) {
+      this.fitbitApi = new Fitbit({ sleeperId: this.sleeper.sleeperId });
+    } else {
+      logger.info(
+        { sleeperId: this.sleeper.sleeperId },
+        'Missing Fitbit configuration, skipping Fitbit reporting for this sleeper',
+      );
+    }
+
     const bucket = config.influxdbBucket;
     const query = `from(bucket: "${bucket}") |> range(start: -1y) |> filter(fn: (r) => r._measurement == "sleep_data" and r.sleeper_id == "${this.sleeper.sleeperId}") |> sort(columns: ["_time"], desc: true) |> limit(n: 1)`;
 
@@ -261,12 +223,21 @@ export class SleeperScraper {
       });
     });
 
+    let scrapedSessions: ScrapedSessions;
     if (lastDate) {
       const startDate = addDays(new TZDate(lastDate, this.timezone), 1);
       logger.info({ startDate }, 'Fetching daily data since last date');
-      return this.getDailyData(startDate);
+      scrapedSessions = await this.getDailyData(startDate);
+    } else {
+      logger.info('No previous data found, fetching historical data');
+      scrapedSessions = await this.getHistoricalData();
     }
-    logger.info('No previous data found, fetching historical data');
-    return this.getHistoricalData();
+
+    logger.info(
+      { count: scrapedSessions.influxPoints.length, sleeperId: this.sleeper.sleeperId },
+      'Points scraped. Writing to InfluxDB...',
+    );
+    this.influxWriteApi.writePoints(scrapedSessions.influxPoints);
+    await this.publishSleepSessions(scrapedSessions.fitbitSleepLogs);
   }
 }

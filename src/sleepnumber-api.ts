@@ -1,11 +1,7 @@
-/* eslint-disable n/no-sync */
-import fs from 'node:fs';
-import path from 'node:path';
-
 import ky from 'ky';
 
-import { configPath } from './config.ts';
 import { logger } from './logger.ts';
+import { getSleepNumberRefreshToken, setSleepNumberRefreshToken } from './token-store.ts';
 
 import type { KyInstance, Options, ResponsePromise } from 'ky';
 
@@ -15,74 +11,34 @@ import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { SleeperEntity } from './models/sleeper/sleeper.model.ts';
 
 export interface SleepNumberApiOptions {
-  clientId: string;
   email: string;
   password: string;
 }
 
 const API_VERSION = '5.3.10';
+const CLIENT_ID = '2oa5825venq9kek1dnrhfp7rdh';
 
 export class SleepNumberAPI {
-  private clientId: string;
-
   private email: string;
 
   private password: string;
 
   private accessToken?: string;
 
-  private tokenExpiry = 0;
-
-  private tokensFile = path.resolve(configPath, 'tokens.json');
+  private expiresAt = 0;
 
   private ky: KyInstance;
 
   constructor(options: SleepNumberApiOptions) {
-    this.clientId = options.clientId;
     this.email = options.email;
     this.password = options.password;
     this.ky = ky.create();
     logger.debug({ email: this.email }, 'SleepNumberAPI initialized');
   }
 
-  private async loadRefreshToken(): Promise<string | undefined> {
-    logger.trace({ file: this.tokensFile }, 'Loading refresh token');
-    if (fs.existsSync(this.tokensFile)) {
-      const tokens = JSON.parse(fs.readFileSync(this.tokensFile, 'utf-8')) as Record<
-        string,
-        string
-      >;
-      logger.debug({ email: this.email, hasToken: !!tokens[this.email] }, 'Refresh token loaded');
-      return this.email ? tokens[this.email] : undefined;
-    }
-    logger.debug('No tokens file found');
-    return undefined;
-  }
-
-  private async saveRefreshToken(refreshToken?: string): Promise<void> {
-    if (!refreshToken) {
-      logger.trace('No refresh token provided, skipping save');
-      return;
-    }
-    const dir = path.dirname(this.tokensFile);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      logger.debug({ dir }, 'Created tokens directory');
-    }
-    let tokens: Record<string, string> = {};
-    if (fs.existsSync(this.tokensFile)) {
-      tokens = JSON.parse(fs.readFileSync(this.tokensFile, 'utf-8'));
-    }
-    if (this.email) {
-      tokens[this.email] = refreshToken;
-      fs.writeFileSync(this.tokensFile, JSON.stringify(tokens, null, 2));
-      logger.info({ email: this.email }, 'Refresh token saved');
-    }
-  }
-
   async login(): Promise<void> {
     logger.info({ email: this.email }, 'Attempting login');
-    const refreshToken = await this.loadRefreshToken();
+    const refreshToken = await getSleepNumberRefreshToken(this.email);
     if (refreshToken) {
       logger.info({ email: this.email }, 'Using refresh token for login');
       await this.getNewTokens(refreshToken);
@@ -90,7 +46,7 @@ export class SleepNumberAPI {
     }
     const url = 'https://ecim.sleepnumber.com/v1/token';
     const payload = {
-      ClientID: this.clientId,
+      ClientID: CLIENT_ID,
       Email: this.email,
       Password: this.password,
     };
@@ -102,19 +58,21 @@ export class SleepNumberAPI {
 
     const { data } = await response.json();
     this.accessToken = data.AccessToken;
-    this.tokenExpiry = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
+    this.expiresAt = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
     logger.info(
-      { expiresIn: data.ExpiresIn, tokenExpiry: this.tokenExpiry },
+      { expiresIn: data.ExpiresIn, tokenExpiry: this.expiresAt },
       'Access token received',
     );
-    await this.saveRefreshToken(data.RefreshToken);
+    if (data.RefreshToken) {
+      await setSleepNumberRefreshToken(this.email, data.RefreshToken);
+    }
   }
 
   private async getNewTokens(refreshToken: string): Promise<void> {
     logger.info({ email: this.email }, 'Refreshing tokens');
     const url = 'https://ecim.sleepnumber.com/v1/token';
     const payload = {
-      ClientID: this.clientId,
+      ClientID: CLIENT_ID,
       RefreshToken: refreshToken,
     };
     logger.debug({ url, email: this.email }, 'Requesting new tokens with refresh token');
@@ -125,16 +83,18 @@ export class SleepNumberAPI {
     const responseData = await response.json();
     const { data } = responseData;
     this.accessToken = data.AccessToken;
-    this.tokenExpiry = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
+    this.expiresAt = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
     logger.info(
-      { expiresIn: data.ExpiresIn, tokenExpiry: this.tokenExpiry },
+      { expiresIn: data.ExpiresIn, tokenExpiry: this.expiresAt },
       'Access token refreshed',
     );
-    await this.saveRefreshToken(data.RefreshToken);
+    if (data.RefreshToken) {
+      await setSleepNumberRefreshToken(this.email, data.RefreshToken);
+    }
   }
 
   private async ensureValidToken(): Promise<void> {
-    if (!this.accessToken || Date.now() >= this.tokenExpiry) {
+    if (!this.accessToken || Date.now() >= this.expiresAt) {
       logger.trace('Token missing or expired, logging in');
       await this.login();
     } else {
