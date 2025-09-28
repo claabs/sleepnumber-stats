@@ -61,10 +61,10 @@ All application configuration is provided via a `config.json` file. The optional
 | emptyBucket         | If true, deletes all data in the bucket before ingest | false      | false                                |
 | tz                  | Timezone for scheduling                               | "UTC"      | "America/New_York"                   |
 | logLevel            | Pino logger level (trace, debug, info, etc.)          | "info"     | "debug"                              |
-| fitbitBaseUrl       | Public HTTPS callback URL for Fitbit OAuth2           | (optional) | "https://sleep.example.com/callback" |
+| fitbitRedirectUri   | Public HTTPS callback URL for Fitbit OAuth2           | (optional) | "https://sleep.example.com/callback" |
 | fitbitClientId      | Fitbit developer app client ID                        | (optional) | "12ABCD"                             |
 | fitbitClientSecret  | Fitbit developer app client secret                    | (optional) | "abcdef1234567890abcdef1234567890"   |
-| port                | Port for the web server (setup/registration)          | 3000       | 3001                                 |
+| port                | Port for the web server (Fitbit setup)                | 3000       | 3001                                 |
 
 ### Example config.json
 
@@ -97,7 +97,7 @@ To enable the Fitbit reporting of sleep data to your Fitbit account (for syncing
     ```json
     {
       ...existing config fields...
-      "fitbitBaseUrl": "https://sleep.example.com/callback",
+      "fitbitRedirectUri": "https://sleep.example.com/callback",
       "fitbitClientId": "12ABCD",
       "fitbitClientSecret": "abcdef1234567890abcdef1234567890"
     }
