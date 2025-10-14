@@ -1,4 +1,6 @@
 import { writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { stringify } from 'envfile';
 
@@ -10,4 +12,4 @@ const envString = stringify({
   CRON_SCHEDULE: config.schedule,
 });
 
-await writeFile('/app/.sleepnumber_env', envString, 'utf-8');
+await writeFile(path.join(os.homedir(), '.sleepnumber_env'), envString, 'utf-8');

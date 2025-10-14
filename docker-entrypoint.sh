@@ -5,7 +5,7 @@ set -e
 node --experimental-transform-types /app/src/entrypoint-config.ts
 
 set -a
-. "/app/.sleepnumber_env"
+. "$HOME/.sleepnumber_env"
 set +a
 
 # If RUN_ON_STARTUP is set, run it once before setting up the schedule
