@@ -2,14 +2,7 @@
 /* eslint-disable no-await-in-loop */
 import { TZDate } from '@date-fns/tz';
 import { Point } from '@influxdata/influxdb-client';
-import {
-  addDays,
-  differenceInDays,
-  differenceInMilliseconds,
-  format,
-  startOfMonth,
-  subMonths,
-} from 'date-fns';
+import { addDays, differenceInDays, format, startOfMonth, subMonths } from 'date-fns';
 
 import { config } from './config.ts';
 import { Fitbit } from './fitbit.ts';
@@ -111,6 +104,8 @@ export class SleeperScraper {
         // Only include sessions within the last 30 days
         if (differenceInDays(new Date(), sessionEndDate) > 30) return null;
 
+        const asleepDurationSec = longestSession.restless + longestSession.restful;
+
         logger.debug(
           { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
           'Creating sleep log record',
@@ -118,7 +113,7 @@ export class SleeperScraper {
         const sleepLog: SleepLogParams = {
           startTime: format(sessionStartDate, 'HH:mm'),
           date: format(sessionStartDate, 'yyyy-MM-dd'),
-          duration: differenceInMilliseconds(sessionEndDate, sessionStartDate),
+          duration: asleepDurationSec * 1000,
         };
         return sleepLog;
       })
