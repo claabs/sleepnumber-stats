@@ -17,6 +17,9 @@ export const SleepConfig = z.object({
   fitbitClientId: z.string().optional(),
   fitbitClientSecret: z.string().optional(),
   port: z.number().min(1).max(65535).default(3000),
+  runOnStartup: z.boolean().default(false),
+  runOnce: z.boolean().default(false),
+  schedule: z.string().default('15 10 * * *'),
 });
 
 export type SleepConfig = z.infer<typeof SleepConfig>;
