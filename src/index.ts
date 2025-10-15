@@ -40,6 +40,7 @@ async function main() {
     const api = new SleepNumberAPI({
       email: config.sleepNumberEmail,
       password: config.sleepNumberPassword,
+      logger,
     });
     const sleeperResp = await api.getSleeper();
     logger.info({ sleeperCount: sleeperResp.sleepers.length }, 'Fetched sleepers');
@@ -49,7 +50,8 @@ async function main() {
     const { beds } = await api.getBed();
     // eslint-disable-next-line no-restricted-syntax
     for (const sleeper of sleeperResp.sleepers) {
-      logger.info({ sleeperId: sleeper.sleeperId, name: sleeper.firstName }, 'Processing sleeper');
+      const sleeperLogger = logger.child({ sleeper: sleeper.firstName });
+      sleeperLogger.info({ sleeperId: sleeper.sleeperId }, 'Processing sleeper');
 
       const sleeperScraper = new SleeperScraper({
         api,
@@ -57,9 +59,10 @@ async function main() {
         influxQueryApi: queryApi,
         beds,
         influxWriteApi: writeApi,
+        logger: sleeperLogger,
       });
       await sleeperScraper.scrapeSleeperData();
-      logger.info({ sleeperId: sleeper.sleeperId }, 'Scrape complete');
+      sleeperLogger.info('Scrape complete');
     }
     await writeApi.close();
     logger.info('All points written to InfluxDB');

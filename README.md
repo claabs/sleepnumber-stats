@@ -50,21 +50,24 @@ All application configuration is provided via a `config.json` file. The optional
 
 ### Configuration Reference
 
-| Key                 | Description                                           | Default    | Example                              |
-|---------------------|-------------------------------------------------------|------------|--------------------------------------|
-| sleepNumberEmail    | SleepNumber account email                             | (required) | "your@email.com"                     |
-| sleepNumberPassword | SleepNumber account password                          | (required) | "yourpassword"                       |
-| influxdbUrl         | InfluxDB server URL                                   | (required) | "http://influxdb:8086"               |
-| influxdbToken       | InfluxDB API token                                    | (required) | "your-influxdb-token"                |
-| influxdbOrg         | InfluxDB organization name                            | (required) | "your-org"                           |
-| influxdbBucket      | InfluxDB bucket name                                  | (required) | "your-bucket"                        |
-| emptyBucket         | If true, deletes all data in the bucket before ingest | false      | false                                |
-| tz                  | Timezone for scheduling                               | "UTC"      | "America/New_York"                   |
-| logLevel            | Pino logger level (trace, debug, info, etc.)          | "info"     | "debug"                              |
-| fitbitRedirectUri   | Public HTTPS callback URL for Fitbit OAuth2           | (optional) | "https://sleep.example.com/callback" |
-| fitbitClientId      | Fitbit developer app client ID                        | (optional) | "12ABCD"                             |
-| fitbitClientSecret  | Fitbit developer app client secret                    | (optional) | "abcdef1234567890abcdef1234567890"   |
-| port                | Port for the web server (Fitbit setup)                | 3000       | 3001                                 |
+| Key                 | Description                                              | Default     | Example                              |
+|---------------------|----------------------------------------------------------|-------------|--------------------------------------|
+| sleepNumberEmail    | SleepNumber account email                                | (required)  | "your@email.com"                     |
+| sleepNumberPassword | SleepNumber account password                             | (required)  | "yourpassword"                       |
+| influxdbUrl         | InfluxDB server URL                                      | (required)  | "http://influxdb:8086"               |
+| influxdbToken       | InfluxDB API token                                       | (required)  | "your-influxdb-token"                |
+| influxdbOrg         | InfluxDB organization name                               | (required)  | "your-org"                           |
+| influxdbBucket      | InfluxDB bucket name                                     | (required)  | "your-bucket"                        |
+| emptyBucket         | If true, deletes all data in the bucket before ingest    | false       | false                                |
+| tz                  | Timezone for scheduling                                  | "UTC"       | "America/New_York"                   |
+| logLevel            | Pino logger level (trace, debug, info, etc.)             | "info"      | "debug"                              |
+| fitbitRedirectUri   | Public HTTPS callback URL for Fitbit OAuth2              | (optional)  | "https://sleep.example.com/callback" |
+| fitbitClientId      | Fitbit developer app client ID                           | (optional)  | "12ABCD"                             |
+| fitbitClientSecret  | Fitbit developer app client secret                       | (optional)  | "abcdef1234567890abcdef1234567890"   |
+| port                | Port for the web server (Fitbit setup)                   | 3000        | 3001                                 |
+| runOnStartup        | When true, the container runs immediately on startup     | false       | true                                 |
+| runOnce             | When true, the container runs once and does not schedule | false       | true                                 |
+| schedule            | Cron syntax schedule for when the job should run         | 15 10 * * * | 0 12 * * *                           |
 
 ### Example config.json
 

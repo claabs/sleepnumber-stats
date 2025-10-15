@@ -22,6 +22,7 @@ if (!clientId || !clientSecret || !redirectUri) {
 const sleepApi = new SleepNumberAPI({
   email: config.sleepNumberEmail,
   password: config.sleepNumberPassword,
+  logger,
 });
 
 let sleepers: Sleeper[];

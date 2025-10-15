@@ -1,13 +1,14 @@
 import ky, { HTTPError } from 'ky';
 
 import { config } from './config.ts';
-import { logger } from './logger.ts';
 import { getFitbitRefreshToken, setFitbitRefreshToken } from './token-store.ts';
 
 import type { KyResponse, SearchParamsOption } from 'ky';
+import type { Logger } from 'pino';
 
 export interface FitbitProps {
   sleeperId: string;
+  logger: Logger;
 }
 
 export interface SleepLogParams {
@@ -72,6 +73,8 @@ const wait = async (seconds: number) =>
   });
 
 export class Fitbit {
+  private logger: Logger;
+
   private sleeperId: string;
 
   private accessToken?: string;
@@ -79,6 +82,7 @@ export class Fitbit {
   private expiresAt = 0;
 
   constructor(props: FitbitProps) {
+    this.logger = props.logger;
     this.sleeperId = props.sleeperId;
   }
 
@@ -86,24 +90,21 @@ export class Fitbit {
    * Ensure access token is set and valid, fetch using refresh token if needed
    */
   private async ensureValidAccessToken(): Promise<string> {
-    logger.trace({ sleeperId: this.sleeperId }, 'Ensuring Fitbit access token');
+    this.logger.trace('Ensuring Fitbit access token');
     if (this.accessToken && Date.now() < this.expiresAt) {
-      logger.debug({ sleeperId: this.sleeperId }, 'Fitbit access token is valid');
+      this.logger.debug('Fitbit access token is valid');
       return this.accessToken;
     }
 
-    logger.info(
-      { sleeperId: this.sleeperId },
-      'Fetching new Fitbit access token using refresh token',
-    );
+    this.logger.info('Fetching new Fitbit access token using refresh token');
     const refreshToken = await getFitbitRefreshToken(this.sleeperId);
     if (!refreshToken) {
-      logger.error({ sleeperId: this.sleeperId }, 'No Fitbit refresh token found');
+      this.logger.error('No Fitbit refresh token found');
       throw new Error(
         `No Fitbit refresh token found for sleeperId ${this.sleeperId}. Follow the setup instructions for Fitbit.`,
       );
     }
-    logger.debug({ sleeperId: this.sleeperId }, 'Requesting new access token from Fitbit API');
+    this.logger.debug('Requesting new access token from Fitbit API');
     const resp = await getFitbitAccessToken({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
@@ -111,10 +112,7 @@ export class Fitbit {
 
     this.accessToken = resp.access_token;
     this.expiresAt = Date.now() + (resp.expires_in ?? 3600) * 1000;
-    logger.info(
-      { sleeperId: this.sleeperId, expiresAt: this.expiresAt },
-      'Fitbit access token received',
-    );
+    this.logger.info({ expiresAt: this.expiresAt }, 'Fitbit access token received');
     await setFitbitRefreshToken(this.sleeperId, resp.refresh_token);
     return this.accessToken;
   }
@@ -125,10 +123,10 @@ export class Fitbit {
    * @returns The created sleep log response
    */
   public async createSleepLog(params: SleepLogParams): Promise<KyResponse> {
-    logger.info({ sleeperId: this.sleeperId, params }, 'Creating Fitbit sleep log');
+    this.logger.info({ params }, 'Creating Fitbit sleep log');
     const accessToken = await this.ensureValidAccessToken();
     const url = 'https://api.fitbit.com/1.2/user/-/sleep.json';
-    logger.debug({ url, params }, 'Fitbit sleep log request');
+    this.logger.debug({ url, params }, 'Fitbit sleep log request');
     return ky.post(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -143,15 +141,12 @@ export class Fitbit {
 
   public async createSleepLogs(paramsArray: SleepLogParams[]): Promise<void> {
     /* eslint-disable no-restricted-syntax, no-await-in-loop */
-    logger.info(
-      { sleeperId: this.sleeperId, count: paramsArray.length },
-      'Starting batch Fitbit sleep log upload',
-    );
+    this.logger.info({ count: paramsArray.length }, 'Starting batch Fitbit sleep log upload');
     for (const [index, params] of paramsArray.entries()) {
       let attempt = 0;
       const batchRequestsRemaining = paramsArray.length - index;
       while (true) {
-        logger.trace({ index, params }, 'Uploading Fitbit sleep log');
+        this.logger.trace({ index, params }, 'Uploading Fitbit sleep log');
         const resp = await this.createSleepLog(params);
         const { status } = resp;
         const intervalRequestsRemaining = parseInt(
@@ -163,28 +158,28 @@ export class Fitbit {
           10,
         );
 
-        logger.debug(
+        this.logger.debug(
           { status, intervalRequestsRemaining, secondsUntilIntervalReset },
           'Fitbit rate limit info',
         );
 
         if (status === 429) {
-          logger.info(
+          this.logger.info(
             { index, params, attempt, secondsUntilIntervalReset },
             'Fitbit rate limit hit, waiting to retry',
           );
           await wait(secondsUntilIntervalReset);
           attempt += 1;
           if (attempt > 5) {
-            logger.error({ params }, 'Max retries reached for Fitbit sleep log');
+            this.logger.error({ params }, 'Max retries reached for Fitbit sleep log');
             break;
           }
         } else if (!resp.ok) {
           const errorText = await resp.text();
-          logger.error({ status, errorText, params }, 'Error creating Fitbit sleep log');
+          this.logger.error({ status, errorText, params }, 'Error creating Fitbit sleep log');
           break;
         } else if (intervalRequestsRemaining <= 1) {
-          logger.info(
+          this.logger.info(
             { index, params, secondsUntilIntervalReset },
             'Fitbit rate limit low, waiting for reset',
           );
@@ -194,14 +189,14 @@ export class Fitbit {
           // if batchRequestsRemaining <= intervalRequestsRemaining, no wait needed
           if (batchRequestsRemaining > intervalRequestsRemaining) {
             const interval = secondsUntilIntervalReset / intervalRequestsRemaining;
-            logger.trace({ index, params, interval }, 'Spacing out Fitbit sleep log requests');
+            this.logger.trace({ index, params, interval }, 'Spacing out Fitbit sleep log requests');
             await wait(interval);
           }
           break;
         }
-        logger.trace({ index, params, status }, 'Retrying Fitbit sleep log upload');
+        this.logger.trace({ index, params, status }, 'Retrying Fitbit sleep log upload');
       }
     }
-    logger.info({ sleeperId: this.sleeperId }, 'Batch Fitbit sleep log upload finished');
+    this.logger.info('Batch Fitbit sleep log upload finished');
   }
 }

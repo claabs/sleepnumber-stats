@@ -4,6 +4,7 @@ import { logger } from './logger.ts';
 import { getSleepNumberRefreshToken, setSleepNumberRefreshToken } from './token-store.ts';
 
 import type { KyInstance, Options, ResponsePromise } from 'ky';
+import type { Logger } from 'pino';
 
 import type { CognitoLoginData, CognitoQuery } from './models/auth/cognito.model.ts';
 import type { BedEntity } from './models/bed/bed.model.ts';
@@ -11,6 +12,7 @@ import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { SleeperEntity } from './models/sleeper/sleeper.model.ts';
 
 export interface SleepNumberApiOptions {
+  logger: Logger;
   email: string;
   password: string;
 }
@@ -19,6 +21,8 @@ const API_VERSION = '5.3.10';
 const CLIENT_ID = '2oa5825venq9kek1dnrhfp7rdh';
 
 export class SleepNumberAPI {
+  private logger: Logger;
+
   private email: string;
 
   private password: string;
@@ -30,6 +34,7 @@ export class SleepNumberAPI {
   private ky: KyInstance;
 
   constructor(options: SleepNumberApiOptions) {
+    this.logger = options.logger;
     this.email = options.email;
     this.password = options.password;
     this.ky = ky.create();
@@ -37,10 +42,10 @@ export class SleepNumberAPI {
   }
 
   async login(): Promise<void> {
-    logger.info({ email: this.email }, 'Attempting login');
+    this.logger.info({ email: this.email }, 'Attempting login');
     const refreshToken = await getSleepNumberRefreshToken(this.email);
     if (refreshToken) {
-      logger.info({ email: this.email }, 'Using refresh token for login');
+      this.logger.info({ email: this.email }, 'Using refresh token for login');
       await this.getNewTokens(refreshToken);
       return;
     }
@@ -50,7 +55,7 @@ export class SleepNumberAPI {
       Email: this.email,
       Password: this.password,
     };
-    logger.debug({ url, email: this.email }, 'Requesting new tokens');
+    this.logger.debug({ url, email: this.email }, 'Requesting new tokens');
     const response = await this.ky.post<CognitoQuery<CognitoLoginData>>(url, {
       json: payload,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -59,7 +64,7 @@ export class SleepNumberAPI {
     const { data } = await response.json();
     this.accessToken = data.AccessToken;
     this.expiresAt = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
-    logger.info(
+    this.logger.info(
       { expiresIn: data.ExpiresIn, tokenExpiry: this.expiresAt },
       'Access token received',
     );
@@ -69,13 +74,13 @@ export class SleepNumberAPI {
   }
 
   private async getNewTokens(refreshToken: string): Promise<void> {
-    logger.info({ email: this.email }, 'Refreshing tokens');
+    this.logger.info({ email: this.email }, 'Refreshing tokens');
     const url = 'https://ecim.sleepnumber.com/v1/token';
     const payload = {
       ClientID: CLIENT_ID,
       RefreshToken: refreshToken,
     };
-    logger.debug({ url, email: this.email }, 'Requesting new tokens with refresh token');
+    this.logger.debug({ url, email: this.email }, 'Requesting new tokens with refresh token');
     const response = await this.ky.put<CognitoQuery<CognitoLoginData>>(url, {
       json: payload,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -84,7 +89,7 @@ export class SleepNumberAPI {
     const { data } = responseData;
     this.accessToken = data.AccessToken;
     this.expiresAt = Date.now() + (data.ExpiresIn ?? 3600) * 1000;
-    logger.info(
+    this.logger.info(
       { expiresIn: data.ExpiresIn, tokenExpiry: this.expiresAt },
       'Access token refreshed',
     );
@@ -95,10 +100,10 @@ export class SleepNumberAPI {
 
   private async ensureValidToken(): Promise<void> {
     if (!this.accessToken || Date.now() >= this.expiresAt) {
-      logger.trace('Token missing or expired, logging in');
+      this.logger.trace('Token missing or expired, logging in');
       await this.login();
     } else {
-      logger.trace('Token is valid');
+      this.logger.trace('Token is valid');
     }
   }
 
@@ -107,13 +112,13 @@ export class SleepNumberAPI {
     url: string,
     options: Options = {},
   ): Promise<ResponsePromise<T>> {
-    logger.trace({ method, url }, 'Making authorized request');
+    this.logger.trace({ method, url }, 'Making authorized request');
     await this.ensureValidToken();
 
     const headers = Object.assign(options.headers ?? {}, {
       Authorization: `Bearer ${this.accessToken}`,
     });
-    logger.debug({ method, url, headers }, 'Request headers set');
+    this.logger.debug({ method, url, headers }, 'Request headers set');
     return this.ky<T>(url, { ...options, method, headers });
   }
 
@@ -123,7 +128,7 @@ export class SleepNumberAPI {
     sleeper: string,
     includeSlices: boolean,
   ): Promise<SleepDataStructure> {
-    logger.info({ date, interval, sleeper, includeSlices }, 'Fetching sleep data');
+    this.logger.info({ date, interval, sleeper, includeSlices }, 'Fetching sleep data');
     await this.ensureValidToken();
     const url = 'https://prod-api.sleepiq.sleepnumber.com/rest/sleepData';
     const searchParams = new URLSearchParams({
@@ -141,13 +146,16 @@ export class SleepNumberAPI {
       Origin: 'https://sleepiq.sleepnumber.com',
       Referer: 'https://sleepiq.sleepnumber.com/',
     };
-    logger.debug({ url, searchParams: Object.fromEntries(searchParams) }, 'Sleep data request');
+    this.logger.debug(
+      { url, searchParams: Object.fromEntries(searchParams) },
+      'Sleep data request',
+    );
     const response = await this.ky.get<SleepDataStructure>(url, { searchParams, headers });
     return response.json();
   }
 
   async getSleeper(): Promise<SleeperEntity> {
-    logger.info('Fetching sleeper profile');
+    this.logger.info('Fetching sleeper profile');
     await this.ensureValidToken();
     const url = 'https://prod-api.sleepiq.sleepnumber.com/rest/sleeper';
     const headers = {
@@ -159,13 +167,13 @@ export class SleepNumberAPI {
       Origin: 'https://sleepiq.sleepnumber.com',
       Referer: 'https://sleepiq.sleepnumber.com/',
     };
-    logger.debug({ url, headers }, 'Sleeper profile request');
+    this.logger.debug({ url, headers }, 'Sleeper profile request');
     const response = await this.ky.get<SleeperEntity>(url, { headers });
     return response.json();
   }
 
   async getBed(): Promise<BedEntity> {
-    logger.info('Fetching beds');
+    this.logger.info('Fetching beds');
     await this.ensureValidToken();
     const url = 'https://prod-api.sleepiq.sleepnumber.com/rest/bed';
     const headers = {
@@ -177,7 +185,7 @@ export class SleepNumberAPI {
       Origin: 'https://sleepiq.sleepnumber.com',
       Referer: 'https://sleepiq.sleepnumber.com/',
     };
-    logger.debug({ url, headers }, 'Bed request');
+    this.logger.debug({ url, headers }, 'Bed request');
     const response = await this.ky.get<BedEntity>(url, { headers });
     return response.json();
   }
