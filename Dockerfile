@@ -6,10 +6,10 @@ WORKDIR /app
 # Set NODE_ENV to production
 ENV NODE_ENV=production CONFIG_PATH=/app/config
 
-# Install dependencies, snooze, tzdata, and cronie (crond)
+# Install dependencies
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev \
-    && apk add --no-cache tzdata supercronic
+    && apk add --no-cache tzdata supercronic jq
 
 # Copy source code
 COPY . .

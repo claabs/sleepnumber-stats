@@ -4,9 +4,10 @@ set -e
 
 node --experimental-transform-types /app/src/entrypoint-config.ts
 
-set -a
-. "$HOME/.sleepnumber_env"
-set +a
+ENTRY_CONFIG=$HOME/entry-config.json
+RUN_ON_STARTUP=$(cat $ENTRY_CONFIG | jq -r ".RUN_ON_STARTUP")
+RUN_ONCE=$(cat $ENTRY_CONFIG | jq -r ".RUN_ONCE")
+CRON_SCHEDULE=$(cat $ENTRY_CONFIG | jq -r ".CRON_SCHEDULE")
 
 # If RUN_ON_STARTUP is set, run it once before setting up the schedule
 echo "Run on startup: ${RUN_ON_STARTUP}"
