@@ -1,12 +1,12 @@
 # SleepNumber Stats
 
-A Node.js/TypeScript application for collecting and storing SleepNumber bed statistics in InfluxDB and sending data to Android Health Connect.
+A Node.js/TypeScript application for collecting and storing SleepNumber bed statistics in Victoria Metrics and sending data to Fitbit.
 
 ## Features
 
 - Collects nightly sleep data from SleepNumber API
-- Stores data in InfluxDB
-- Optionally sends sleep sessions to Android Health Connect
+- Stores data in Victoria Metrics
+- Optionally sends sleep sessions to Fitbit
 
 ## Quick Start (Docker)
 
@@ -50,24 +50,23 @@ All application configuration is provided via a `config.json` file. The optional
 
 ### Configuration Reference
 
-| Key                 | Description                                              | Default     | Example                              |
-|---------------------|----------------------------------------------------------|-------------|--------------------------------------|
-| sleepNumberEmail    | SleepNumber account email                                | (required)  | "your@email.com"                     |
-| sleepNumberPassword | SleepNumber account password                             | (required)  | "yourpassword"                       |
-| influxdbUrl         | InfluxDB server URL                                      | (required)  | "http://influxdb:8086"               |
-| influxdbToken       | InfluxDB API token                                       | (required)  | "your-influxdb-token"                |
-| influxdbOrg         | InfluxDB organization name                               | (required)  | "your-org"                           |
-| influxdbBucket      | InfluxDB bucket name                                     | (required)  | "your-bucket"                        |
-| emptyBucket         | If true, deletes all data in the bucket before ingest    | false       | false                                |
-| tz                  | Timezone for scheduling                                  | "UTC"       | "America/New_York"                   |
-| logLevel            | Pino logger level (trace, debug, info, etc.)             | "info"      | "debug"                              |
-| fitbitRedirectUri   | Public HTTPS callback URL for Fitbit OAuth2              | (optional)  | "https://sleep.example.com/callback" |
-| fitbitClientId      | Fitbit developer app client ID                           | (optional)  | "12ABCD"                             |
-| fitbitClientSecret  | Fitbit developer app client secret                       | (optional)  | "abcdef1234567890abcdef1234567890"   |
-| port                | Port for the web server (Fitbit setup)                   | 3000        | 3001                                 |
-| runOnStartup        | When true, the container runs immediately on startup     | false       | true                                 |
-| runOnce             | When true, the container runs once and does not schedule | false       | true                                 |
-| schedule            | Cron syntax schedule for when the job should run         | 15 10 * * * | 0 12 * * *                           |
+| Key                          | Description                                                        | Default     | Example                              |
+|------------------------------|--------------------------------------------------------------------|-------------|--------------------------------------|
+| sleepNumberEmail             | SleepNumber account email                                          | (required)  | "your@email.com"                     |
+| sleepNumberPassword          | SleepNumber account password                                       | (required)  | "yourpassword"                       |
+| victoriaMetricsUrl           | Victoria Metrics server URL                                        | (required)  | "http://172.17.0.1:8428"             |
+| victoriaMetricsAuth.username | Victoria Metrics username                                          | (optional)  | "admin"                              |
+| victoriaMetricsAuth.password | Victoria Metrics password                                          | (optional)  | "passwort"                           |
+| deleteMetrics                | If true, deletes all existing data previously stored before ingest | false       | true                                 |
+| tz                           | Timezone for scheduling                                            | "UTC"       | "America/New_York"                   |
+| logLevel                     | Pino logger level (trace, debug, info, etc.)                       | "info"      | "debug"                              |
+| fitbitRedirectUri            | Public HTTPS callback URL for Fitbit OAuth2                        | (optional)  | "https://sleep.example.com/callback" |
+| fitbitClientId               | Fitbit developer app client ID                                     | (optional)  | "12ABCD"                             |
+| fitbitClientSecret           | Fitbit developer app client secret                                 | (optional)  | "abcdef1234567890abcdef1234567890"   |
+| port                         | Port for the web server (Fitbit setup)                             | 3000        | 3001                                 |
+| runOnStartup                 | When true, the container runs immediately on startup               | false       | true                                 |
+| runOnce                      | When true, the container runs once and does not schedule           | false       | true                                 |
+| schedule                     | Cron syntax schedule for when the job should run                   | 15 10 * * * | 0 12 * * *                           |
 
 ### Example config.json
 
@@ -75,11 +74,12 @@ All application configuration is provided via a `config.json` file. The optional
 {
   "sleepNumberEmail": "your@email.com",
   "sleepNumberPassword": "yourpassword",
-  "influxdbUrl": "http://influxdb:8086",
-  "influxdbToken": "your-influxdb-token",
-  "influxdbOrg": "your-org",
-  "influxdbBucket": "your-bucket",
-  "emptyBucket": false,
+  "victoriaMetricsUrl": "http://victoriametrics:8086",
+  "victoriaMetricsAuth": {
+    "username": "admin",
+    "password": "passwort",
+  },
+  "deleteMetrics": false,
   "tz": "America/New_York",
   "logLevel": "info"
 }

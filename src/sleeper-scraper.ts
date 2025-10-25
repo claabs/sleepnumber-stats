@@ -1,15 +1,16 @@
 /* eslint-disable no-underscore-dangle */
 /* eslint-disable no-await-in-loop */
 import { TZDate } from '@date-fns/tz';
-import { Point } from '@influxdata/influxdb-client';
-import { addDays, differenceInDays, format, startOfMonth, subMonths } from 'date-fns';
+import { addDays, differenceInDays, format, startOfMonth, subMonths, subYears } from 'date-fns';
+import { pushTimeseries } from 'prometheus-remote-write';
 
 import { config } from './config.ts';
 import { Fitbit } from './fitbit.ts';
 import { getFitbitRefreshToken } from './token-store.ts';
 
-import type { QueryApi, WriteApi } from '@influxdata/influxdb-client';
 import type { Logger } from 'pino';
+import type { PrometheusDriver, RangeVector } from 'prometheus-query';
+import type { Options, Timeseries } from 'prometheus-remote-write';
 
 import type { SleepLogParams } from './fitbit.ts';
 import type { Bed } from './models/bed/bed.model.ts';
@@ -21,15 +22,41 @@ export interface SleeperScraperProps {
   api: SleepNumberAPI;
   beds: Bed[];
   sleeper: Sleeper;
-  influxQueryApi: QueryApi;
-  influxWriteApi: WriteApi;
+  queryApi: PrometheusDriver;
   logger: Logger;
 }
 
 interface ScrapedSessions {
-  influxPoints: Point[];
+  metricsData: Timeseries[];
   fitbitSleepLogs: SleepLogParams[];
 }
+
+type MetricName =
+  | 'sleepnumber_stats_breath_rate'
+  | 'sleepnumber_stats_fall_asleep_period'
+  | 'sleepnumber_stats_heart_rate'
+  | 'sleepnumber_stats_hrv'
+  | 'sleepnumber_stats_in_bed'
+  | 'sleepnumber_stats_out_of_bed'
+  | 'sleepnumber_stats_restful'
+  | 'sleepnumber_stats_restless'
+  | 'sleepnumber_stats_sleep_number'
+  | 'sleepnumber_stats_sleep_quotient'
+  | 'sleepnumber_stats_total_sleep_session_time';
+
+export const METRIC_NAMES: MetricName[] = [
+  'sleepnumber_stats_breath_rate',
+  'sleepnumber_stats_fall_asleep_period',
+  'sleepnumber_stats_heart_rate',
+  'sleepnumber_stats_hrv',
+  'sleepnumber_stats_in_bed',
+  'sleepnumber_stats_out_of_bed',
+  'sleepnumber_stats_restful',
+  'sleepnumber_stats_restless',
+  'sleepnumber_stats_sleep_number',
+  'sleepnumber_stats_sleep_quotient',
+  'sleepnumber_stats_total_sleep_session_time',
+];
 
 export class SleeperScraper {
   private logger: Logger;
@@ -40,9 +67,7 @@ export class SleeperScraper {
 
   private timezone: string;
 
-  private influxQueryApi: QueryApi;
-
-  private influxWriteApi: WriteApi;
+  private queryApi: PrometheusDriver;
 
   private fitbitApi?: Fitbit;
 
@@ -50,8 +75,7 @@ export class SleeperScraper {
     this.logger = props.logger;
     this.api = props.api;
     this.sleeper = props.sleeper;
-    this.influxQueryApi = props.influxQueryApi;
-    this.influxWriteApi = props.influxWriteApi;
+    this.queryApi = props.queryApi;
 
     const bed = props.beds.find(
       (b) =>
@@ -62,40 +86,93 @@ export class SleeperScraper {
     this.logger.debug('SleeperScraper initialized');
   }
 
-  private createPoints(sleepDataStruct: SleepDataStructure): Point[] {
+  private createTimeseries(sleepDataStruct: SleepDataStructure): Timeseries[] {
     this.logger.trace(
       { days: sleepDataStruct.sleepData.length },
       'Creating points from sleep data',
     );
-    return (
-      sleepDataStruct.sleepData
-        .map((sleepDataDay) => {
-          const longestSession = sleepDataDay.sessions.find(
-            (session) => session.longest && session.isFinalized,
-          );
-          if (longestSession) {
-            const point = new Point('sleep_data')
-              .timestamp(new TZDate(longestSession.endDate, this.timezone))
-              .tag('sleeper_id', this.sleeper.sleeperId)
-              .tag('sleeper_name', this.sleeper.firstName)
-              .intField('heart_rate', longestSession.avgHeartRate)
-              .intField('breath_rate', longestSession.avgRespirationRate)
-              .intField('sleep_quotient', longestSession.sleepQuotient)
-              .intField('hrv', longestSession.hrv)
-              .intField('sleep_number', longestSession.sleepNumber)
-              .intField('in_bed', longestSession.inBed)
-              .intField('out_of_bed', longestSession.outOfBed)
-              .intField('restful', longestSession.restful)
-              .intField('restless', longestSession.restless)
-              .intField('total_sleep_session_time', longestSession.totalSleepSessionTime)
-              .intField('fall_asleep_period', longestSession.fallAsleepPeriod);
 
-            return point;
-          }
-          return null;
-        })
-        .filter((point) => point !== null) ?? []
-    );
+    const metricSamples: Record<MetricName, { value: number; timestamp: number }[]> = {
+      sleepnumber_stats_breath_rate: [],
+      sleepnumber_stats_fall_asleep_period: [],
+      sleepnumber_stats_heart_rate: [],
+      sleepnumber_stats_hrv: [],
+      sleepnumber_stats_in_bed: [],
+      sleepnumber_stats_out_of_bed: [],
+      sleepnumber_stats_restful: [],
+      sleepnumber_stats_restless: [],
+      sleepnumber_stats_sleep_number: [],
+      sleepnumber_stats_sleep_quotient: [],
+      sleepnumber_stats_total_sleep_session_time: [],
+    };
+
+    sleepDataStruct.sleepData.forEach((sleepDataDay) => {
+      const longestSession = sleepDataDay.sessions.find(
+        (session) => session.longest && session.isFinalized,
+      );
+      if (!longestSession) return;
+
+      const tsDate = new TZDate(longestSession.endDate, this.timezone);
+      const timestamp = tsDate.getTime();
+
+      metricSamples.sleepnumber_stats_breath_rate.push({
+        timestamp,
+        value: longestSession.avgRespirationRate,
+      });
+      metricSamples.sleepnumber_stats_fall_asleep_period.push({
+        timestamp,
+        value: longestSession.fallAsleepPeriod,
+      });
+      metricSamples.sleepnumber_stats_heart_rate.push({
+        timestamp,
+        value: longestSession.avgHeartRate,
+      });
+      metricSamples.sleepnumber_stats_hrv.push({
+        timestamp,
+        value: longestSession.hrv,
+      });
+      metricSamples.sleepnumber_stats_in_bed.push({
+        timestamp,
+        value: longestSession.inBed,
+      });
+      metricSamples.sleepnumber_stats_out_of_bed.push({
+        timestamp,
+        value: longestSession.outOfBed,
+      });
+      metricSamples.sleepnumber_stats_restful.push({
+        timestamp,
+        value: longestSession.restful,
+      });
+      metricSamples.sleepnumber_stats_restless.push({
+        timestamp,
+        value: longestSession.restless,
+      });
+      metricSamples.sleepnumber_stats_sleep_number.push({
+        timestamp,
+        value: longestSession.sleepNumber,
+      });
+      metricSamples.sleepnumber_stats_sleep_quotient.push({
+        timestamp,
+        value: longestSession.sleepQuotient,
+      });
+      metricSamples.sleepnumber_stats_total_sleep_session_time.push({
+        timestamp,
+        value: longestSession.totalSleepSessionTime,
+      });
+    });
+
+    const series: Timeseries[] = Object.entries(metricSamples)
+      .map(([metricName, samples]) => ({
+        labels: {
+          __name__: metricName,
+          sleeper_id: String(this.sleeper.sleeperId),
+          sleeper_name: String(this.sleeper.firstName),
+        },
+        samples: samples.sort((a, b) => a.timestamp - b.timestamp),
+      }))
+      .filter((ts) => ts.samples.length > 0);
+
+    return series;
   }
 
   private createSleepParams(sleepData: SleepDataStructure): SleepLogParams[] {
@@ -138,7 +215,7 @@ export class SleeperScraper {
 
   async getHistoricalData(): Promise<ScrapedSessions> {
     this.logger.info('Fetching historical sleep data');
-    const historicalPoints: Point[] = [];
+    const historicalTimeseries: Timeseries[] = [];
     const sleepLogParams: SleepLogParams[] = [];
     let currentDate = startOfMonth(new TZDate(new Date(), this.timezone));
 
@@ -152,22 +229,22 @@ export class SleeperScraper {
         false,
       );
       sleepLogParams.push(...this.createSleepParams(sleepDataResp));
-      const points = this.createPoints(sleepDataResp);
+      const points = this.createTimeseries(sleepDataResp);
       if (!points.length) {
         this.logger.info('No more historical points found');
         break;
       }
-      historicalPoints.push(...points);
+      historicalTimeseries.push(...points);
       currentDate = subMonths(currentDate, 1);
     }
-    this.logger.info({ count: historicalPoints.length }, 'Historical points fetched');
+    this.logger.info({ count: historicalTimeseries.length }, 'Historical points fetched');
 
-    return { influxPoints: historicalPoints, fitbitSleepLogs: sleepLogParams };
+    return { metricsData: historicalTimeseries, fitbitSleepLogs: sleepLogParams };
   }
 
   async getDailyData(startDate: Date): Promise<ScrapedSessions> {
     this.logger.info({ startDate }, 'Fetching daily sleep data');
-    const dailyPoints: Point[] = [];
+    const dailyTimeseries: Timeseries[] = [];
     const sleepLogParams: SleepLogParams[] = [];
     const today = new TZDate(new Date(), this.timezone);
     let date = new TZDate(startDate, this.timezone);
@@ -180,13 +257,13 @@ export class SleeperScraper {
         this.sleeper.sleeperId,
         false,
       );
-      const points = this.createPoints(sleepDataResp);
+      const timeseries = this.createTimeseries(sleepDataResp);
       sleepLogParams.push(...this.createSleepParams(sleepDataResp));
-      dailyPoints.push(...points);
+      dailyTimeseries.push(...timeseries);
       date = addDays(date, 1);
     }
-    this.logger.info({ count: dailyPoints.length }, 'Daily points fetched');
-    return { influxPoints: dailyPoints, fitbitSleepLogs: sleepLogParams };
+    this.logger.info({ count: dailyTimeseries.length }, 'Daily points fetched');
+    return { metricsData: dailyTimeseries, fitbitSleepLogs: sleepLogParams };
   }
 
   async scrapeSleeperData(): Promise<void> {
@@ -199,28 +276,27 @@ export class SleeperScraper {
       this.logger.info('Missing Fitbit configuration, skipping Fitbit reporting for this sleeper');
     }
 
-    const bucket = config.influxdbBucket;
-    const query = `from(bucket: "${bucket}") |> range(start: -1y) |> filter(fn: (r) => r._measurement == "sleep_data" and r.sleeper_id == "${this.sleeper.sleeperId}") |> sort(columns: ["_time"], desc: true) |> limit(n: 1)`;
-
     let lastDate: Date | undefined;
-    await new Promise<void>((resolve, reject) => {
-      this.influxQueryApi.queryRows(query, {
-        next: (row, tableMeta) => {
-          const o = tableMeta.toObject(row);
-          if (o._time) {
-            lastDate = new Date(o._time);
-            this.logger.debug({ lastDate }, 'Found last date in InfluxDB');
-          }
-        },
-        error: (error: Error) => {
-          this.logger.error({ error }, 'Error querying InfluxDB');
-          reject(error);
-        },
-        complete: () => {
-          resolve();
-        },
-      });
-    });
+
+    try {
+      const now = new Date();
+      const resp = await this.queryApi.rangeQuery(
+        `timestamp(sleepnumber_stats_total_sleep_session_time{sleeper_id="${this.sleeper.sleeperId}"})`,
+        subYears(now, 1),
+        now,
+        6 * 60 * 60, // 1 point every 6 hours
+      );
+      const rangeVector = resp.result[0] as RangeVector | undefined;
+      const rangeValues = (rangeVector?.values ?? []) as { time: Date; value: number }[];
+      const timestamps = rangeValues.map((row) => row.value);
+
+      if (timestamps.length > 0) {
+        lastDate = new Date(Math.max(...timestamps) * 1000);
+        this.logger.debug({ lastDate }, 'Found last date in Prometheus');
+      }
+    } catch (error) {
+      this.logger.warn({ error }, 'Error querying Prometheus for last metric timestamp');
+    }
 
     let scrapedSessions: ScrapedSessions;
     if (lastDate) {
@@ -233,10 +309,22 @@ export class SleeperScraper {
     }
 
     this.logger.info(
-      { count: scrapedSessions.influxPoints.length },
-      'Points scraped. Writing to InfluxDB...',
+      { count: scrapedSessions.metricsData.length },
+      'Points scraped. Writing to metrics database...',
     );
-    this.influxWriteApi.writePoints(scrapedSessions.influxPoints);
+    const remoteWriteConfig: Options = {
+      url: new URL('/api/v1/write', config.victoriaMetricsUrl).toString(),
+      auth: config.victoriaMetricsAuth,
+    };
+    // eslint-disable-next-line no-restricted-syntax
+    for (const timeseries of scrapedSessions.metricsData) {
+      this.logger.trace(
+        { metric: timeseries.labels.__name__, count: timeseries.samples.length },
+        'Writing timeseries to Prometheus',
+      );
+      await pushTimeseries(timeseries, remoteWriteConfig);
+    }
+
     await this.publishSleepSessions(scrapedSessions.fitbitSleepLogs);
   }
 }

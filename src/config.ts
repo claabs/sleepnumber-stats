@@ -6,11 +6,14 @@ import z from 'zod';
 export const SleepConfig = z.object({
   sleepNumberEmail: z.email(),
   sleepNumberPassword: z.string().min(1),
-  influxdbUrl: z.url(),
-  influxdbToken: z.string().min(1),
-  influxdbOrg: z.string().min(1),
-  influxdbBucket: z.string().min(1),
-  emptyBucket: z.boolean().default(false),
+  victoriaMetricsUrl: z.url(),
+  victoriaMetricsAuth: z
+    .object({
+      username: z.string().min(1),
+      password: z.string().min(1),
+    })
+    .optional(),
+  deleteMetrics: z.boolean().default(false),
   tz: z.string().default(process.env.TZ ?? 'UTC'),
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
   fitbitRedirectUri: z.url().optional(),

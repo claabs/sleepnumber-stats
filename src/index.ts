@@ -1,41 +1,41 @@
 /* eslint-disable no-await-in-loop */
 
-import { InfluxDB } from '@influxdata/influxdb-client';
-import { DeleteAPI } from '@influxdata/influxdb-client-apis';
 import 'dotenv/config';
+import ky from 'ky';
+import { PrometheusDriver } from 'prometheus-query';
 
 import { config } from './config.ts';
 import { logger } from './logger.ts';
-import { SleeperScraper } from './sleeper-scraper.ts';
+import { METRIC_NAMES, SleeperScraper } from './sleeper-scraper.ts';
 import { SleepNumberAPI } from './sleepnumber-api.ts';
 
 async function main() {
   try {
     logger.info('Starting SleepNumber stats ingestion');
-    const influxDbClient = new InfluxDB({
-      url: config.influxdbUrl,
-      token: config.influxdbToken,
-      timeout: 5 * 60 * 1000,
+
+    const promQueryApi = new PrometheusDriver({
+      endpoint: config.victoriaMetricsUrl,
+      auth: config.victoriaMetricsAuth,
     });
 
-    if (config.emptyBucket) {
-      logger.info(
-        { bucket: config.influxdbBucket },
-        'emptyBucket is true, deleting all data from InfluxDB bucket',
-      );
-      const deleteApi = new DeleteAPI(influxDbClient);
-      const start = '1970-01-01T00:00:00Z';
-      // const start = subDays(new Date(), 1).toISOString();
-      const stop = new Date().toISOString();
-      await deleteApi.postDelete({
-        org: config.influxdbOrg,
-        bucket: config.influxdbBucket,
-        body: {
-          start,
-          stop,
-        },
+    if (config.deleteMetrics) {
+      logger.info('deleteMetrics is true, deleting all data from metrics database');
+      const searchParams = new URLSearchParams();
+      METRIC_NAMES.forEach((name) => {
+        searchParams.append('match[]', name);
       });
-      logger.info({ bucket: config.influxdbBucket }, 'All data deleted from InfluxDB bucket');
+      const authHeader = config.victoriaMetricsAuth
+        ? `Basic ${Buffer.from(
+            `${config.victoriaMetricsAuth.username}:${config.victoriaMetricsAuth.password}`,
+          ).toString('base64')}`
+        : undefined;
+      await ky.get(new URL('/api/v1/admin/tsdb/delete_series', config.victoriaMetricsUrl), {
+        headers: {
+          Authorization: authHeader,
+        },
+        searchParams,
+      });
+      logger.info('All data deleted from metrics database');
     }
     const api = new SleepNumberAPI({
       email: config.sleepNumberEmail,
@@ -45,8 +45,6 @@ async function main() {
     const sleeperResp = await api.getSleeper();
     logger.info({ sleeperCount: sleeperResp.sleepers.length }, 'Fetched sleepers');
 
-    const queryApi = influxDbClient.getQueryApi(config.influxdbOrg);
-    const writeApi = influxDbClient.getWriteApi(config.influxdbOrg, config.influxdbBucket, 's', {});
     const { beds } = await api.getBed();
     // eslint-disable-next-line no-restricted-syntax
     for (const sleeper of sleeperResp.sleepers) {
@@ -56,16 +54,14 @@ async function main() {
       const sleeperScraper = new SleeperScraper({
         api,
         sleeper,
-        influxQueryApi: queryApi,
+        queryApi: promQueryApi,
         beds,
-        influxWriteApi: writeApi,
         logger: sleeperLogger,
       });
       await sleeperScraper.scrapeSleeperData();
       sleeperLogger.info('Scrape complete');
     }
-    await writeApi.close();
-    logger.info('All points written to InfluxDB');
+    logger.info('All points written to metrics database');
   } catch (err) {
     logger.error(err);
   }
