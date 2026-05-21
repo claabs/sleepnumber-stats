@@ -52,21 +52,21 @@ All application configuration is provided via a `config.json` file. The optional
 
 | Key                          | Description                                                        | Default     | Example                              |
 |------------------------------|--------------------------------------------------------------------|-------------|--------------------------------------|
-| sleepNumberEmail             | SleepNumber account email                                          | (required)  | "your@email.com"                     |
+| sleepNumberEmail             | SleepNumber account email                                          | (required)  | "<your@email.com>"                     |
 | sleepNumberPassword          | SleepNumber account password                                       | (required)  | "yourpassword"                       |
-| victoriaMetricsUrl           | Victoria Metrics server URL                                        | (required)  | "http://172.17.0.1:8428"             |
+| victoriaMetricsUrl           | Victoria Metrics server URL                                        | (required)  | "<http://172.17.0.1:8428>"             |
 | victoriaMetricsAuth.username | Victoria Metrics username                                          | (optional)  | "admin"                              |
 | victoriaMetricsAuth.password | Victoria Metrics password                                          | (optional)  | "passwort"                           |
 | deleteMetrics                | If true, deletes all existing data previously stored before ingest | false       | true                                 |
 | tz                           | Timezone for scheduling                                            | "UTC"       | "America/New_York"                   |
 | logLevel                     | Pino logger level (trace, debug, info, etc.)                       | "info"      | "debug"                              |
-| fitbitRedirectUri            | Public HTTPS callback URL for Fitbit OAuth2                        | (optional)  | "https://sleep.example.com/callback" |
+| fitbitRedirectUri            | Public HTTPS callback URL for Fitbit OAuth2                        | (optional)  | "<https://sleep.example.com/callback>" |
 | fitbitClientId               | Fitbit developer app client ID                                     | (optional)  | "12ABCD"                             |
 | fitbitClientSecret           | Fitbit developer app client secret                                 | (optional)  | "abcdef1234567890abcdef1234567890"   |
 | port                         | Port for the web server (Fitbit setup)                             | 3000        | 3001                                 |
 | runOnStartup                 | When true, the container runs immediately on startup               | false       | true                                 |
 | runOnce                      | When true, the container runs once and does not schedule           | false       | true                                 |
-| schedule                     | Cron syntax schedule for when the job should run                   | 15 10 * * * | 0 12 * * *                           |
+| schedule                     | Cron syntax schedule for when the job should run                   | 15 10 ** * | 0 12 ** *                           |
 
 ### Example config.json
 
@@ -85,24 +85,30 @@ All application configuration is provided via a `config.json` file. The optional
 }
 ```
 
-#### Optional: Fitbit Integration
+#### Optional: Google Health Integration
 
-To enable the Fitbit reporting of sleep data to your Fitbit account (for syncing to your phone):
+To enable the reporting of sleep data to your Google Health account (for syncing to your phone):
 
 1. Setup an HTTPS domain reverse proxied to your container
-1. Create a Fitbit developer application:
-    1. Create an app [on the Fitbit dev portal](https://dev.fitbit.com/apps/new)
-    1. Set **OAuth 2.0 Application Type** to `Personal` if only you are using it, or `Server` if accounts other than the developer's account will connect
-    1. Set **Redirect URL** to your HTTPS URL set in the config `fitbitBaseUrl`
-    1. Set **Default Access Type** to `Read & Write`
-1. Add the Fitbit options to your config:
+1. Create a project in the Google Cloud Console:
+    1. Create an app [on the Google Cloud Console](https://console.cloud.google.com/welcome?organizationId=0)
+    1. Go to the [Google Health](https://console.cloud.google.com/marketplace/product/google/health.googleapis.com) application and click **Enable**
+    1. Click [**Credentials**](https://console.cloud.google.com/apis/credentials) in the navigation menu
+    1. Click **Create credentials** and then **OAuth client ID**
+    1. Click **Configure consent screen** and complete the form
+    1. Click **Create OAuth client**
+      - Application type: **Web application**
+      - Name: **sleepnumber-stats**
+      - Authorized JavaScript origins: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` (e.g. `https://sleep.example.com`)
+      - Authorized redirect URIs: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` + `/callback` (e.g. `https://sleep.example.com/callback`)
+1. Add the Google Health options to your config:
 
     ```json
     {
       ...existing config fields...
-      "fitbitRedirectUri": "https://sleep.example.com/callback",
-      "fitbitClientId": "12ABCD",
-      "fitbitClientSecret": "abcdef1234567890abcdef1234567890"
+      "googleRedirectUri": "https://sleep.example.com/callback",
+      "googleClientId": "123456789012-abcdefghijklmnopqrstuvwcyz123456.apps.googleusercontent.com",
+      "googleClientSecret": "ABCDEF-abcdefghijklmnopqrstuvwxyzab"
     }
     ```
 

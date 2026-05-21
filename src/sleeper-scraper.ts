@@ -1,18 +1,27 @@
 /* eslint-disable no-underscore-dangle */
 /* eslint-disable no-await-in-loop */
 import { TZDate } from '@date-fns/tz';
-import { addDays, differenceInDays, format, startOfMonth, subMonths, subYears } from 'date-fns';
+import {
+  addDays,
+  addSeconds,
+  differenceInDays,
+  format,
+  startOfMonth,
+  subMonths,
+  subYears,
+} from 'date-fns';
 import { pushTimeseries } from 'prometheus-remote-write';
 
 import { config } from './config.ts';
-import { Fitbit } from './fitbit.ts';
-import { getFitbitRefreshToken } from './token-store.ts';
+import { GoogleHealth } from './google-health.js';
+import { getGoogleRefreshToken } from './token-store.ts';
 
+import type google from '@googleapis/health';
 import type { Logger } from 'pino';
 import type { PrometheusDriver, RangeVector } from 'prometheus-query';
 import type { Options, Timeseries } from 'prometheus-remote-write';
 
-import type { SleepLogParams } from './fitbit.ts';
+import type { GoogleHealthSleepStageType } from './google-health.js';
 import type { Bed } from './models/bed/bed.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { Sleeper } from './models/sleeper/sleeper.model.ts';
@@ -28,7 +37,7 @@ export interface SleeperScraperProps {
 
 interface ScrapedSessions {
   metricsData: Timeseries[];
-  fitbitSleepLogs: SleepLogParams[];
+  googleSleepLogs: google.health_v4.Schema$Sleep[];
 }
 
 type MetricName =
@@ -69,7 +78,7 @@ export class SleeperScraper {
 
   private queryApi: PrometheusDriver;
 
-  private fitbitApi?: Fitbit;
+  private googleHealthApi?: GoogleHealth;
 
   constructor(props: SleeperScraperProps) {
     this.logger = props.logger;
@@ -175,7 +184,7 @@ export class SleeperScraper {
     return series;
   }
 
-  private createSleepParams(sleepData: SleepDataStructure): SleepLogParams[] {
+  private createGoogleSleepLogs(sleepData: SleepDataStructure): google.health_v4.Schema$Sleep[] {
     this.logger.trace(
       { days: sleepData.sleepData.length },
       'Creating sleep sessions from sleep data',
@@ -191,32 +200,73 @@ export class SleeperScraper {
         // Only include sessions within the last 30 days
         if (differenceInDays(new Date(), sessionEndDate) > 30) return null;
 
-        const asleepDurationSec = longestSession.restless + longestSession.restful;
-
-        this.logger.debug({ endDate: longestSession.endDate }, 'Creating sleep log record');
-        const sleepLog: SleepLogParams = {
-          startTime: format(sessionStartDate, 'HH:mm'),
-          date: format(sessionStartDate, 'yyyy-MM-dd'),
-          duration: asleepDurationSec * 1000,
+        this.logger.debug(
+          { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
+          'Creating sleep session record',
+        );
+        const stageFields: { value: number; type: GoogleHealthSleepStageType }[] = [
+          {
+            value: longestSession.outOfBed,
+            type: 'AWAKE',
+          },
+          {
+            value: longestSession.fallAsleepPeriod,
+            type: 'AWAKE',
+          },
+          {
+            value: longestSession.restless,
+            type: 'RESTLESS',
+          },
+          {
+            value: longestSession.restful,
+            type: 'ASLEEP',
+          },
+        ];
+        let stageTime = new TZDate(longestSession.startDate, this.timezone);
+        const stages: google.health_v4.Schema$SleepStage[] = stageFields
+          .filter((field) => field.value > 0)
+          .map((field) => {
+            const endTime = addSeconds(new TZDate(stageTime, this.timezone), field.value);
+            const stage: google.health_v4.Schema$SleepStage = {
+              type: field.type,
+              startTime: new TZDate(stageTime, 'UTC').toISOString(),
+              endTime: new TZDate(endTime, 'UTC').toISOString(),
+            };
+            stageTime = endTime;
+            return stage;
+          });
+        const sleepSession: google.health_v4.Schema$Sleep = {
+          interval: {
+            startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
+            endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
+          },
+          stages,
+          /**
+           * https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints#sleep.sleeptype
+           */
+          type: 'CLASSIC', // Classic sleep is a sleep with 3 stages types: AWAKE, RESTLESS and ASLEEP.
         };
-        return sleepLog;
+        return sleepSession;
       })
       .filter((session) => session !== null);
   }
 
-  private async publishSleepSessions(sleepLogs: SleepLogParams[]): Promise<void> {
-    if (!this.fitbitApi) return;
+  private async publishSleepSessions(sleepLogs: google.health_v4.Schema$Sleep[]): Promise<void> {
+    if (!this.googleHealthApi) return;
     if (!sleepLogs.length) return;
 
-    this.logger.debug({ count: sleepLogs.length }, 'Publishing sleep sessions to Fitbit');
-    await this.fitbitApi.createSleepLogs(sleepLogs);
-    this.logger.info({ count: sleepLogs.length }, 'Successfully published Fitbit sleep log batch');
+    this.logger.debug({ count: sleepLogs.length }, 'Publishing sleep sessions to Google Health');
+    await this.googleHealthApi.createSleepLogs(sleepLogs);
+    this.logger.info(
+      { count: sleepLogs.length },
+      'Successfully published Google Health sleep log batch',
+    );
   }
 
   async getHistoricalData(): Promise<ScrapedSessions> {
     this.logger.info('Fetching historical sleep data');
     const historicalTimeseries: Timeseries[] = [];
-    const sleepLogParams: SleepLogParams[] = [];
+    const googleSleepLogs: google.health_v4.Schema$Sleep[] = [];
     let currentDate = startOfMonth(new TZDate(new Date(), this.timezone));
 
     while (true) {
@@ -228,7 +278,7 @@ export class SleeperScraper {
         this.sleeper.sleeperId,
         false,
       );
-      sleepLogParams.push(...this.createSleepParams(sleepDataResp));
+      googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
       const points = this.createTimeseries(sleepDataResp);
       if (!points.length) {
         this.logger.info('No more historical points found');
@@ -239,13 +289,13 @@ export class SleeperScraper {
     }
     this.logger.info({ count: historicalTimeseries.length }, 'Historical points fetched');
 
-    return { metricsData: historicalTimeseries, fitbitSleepLogs: sleepLogParams };
+    return { metricsData: historicalTimeseries, googleSleepLogs };
   }
 
   async getDailyData(startDate: Date): Promise<ScrapedSessions> {
     this.logger.info({ startDate }, 'Fetching daily sleep data');
     const dailyTimeseries: Timeseries[] = [];
-    const sleepLogParams: SleepLogParams[] = [];
+    const googleSleepLogs: google.health_v4.Schema$Sleep[] = [];
     const today = new TZDate(new Date(), this.timezone);
     let date = new TZDate(startDate, this.timezone);
     while (date <= today) {
@@ -258,22 +308,29 @@ export class SleeperScraper {
         false,
       );
       const timeseries = this.createTimeseries(sleepDataResp);
-      sleepLogParams.push(...this.createSleepParams(sleepDataResp));
+      googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
       dailyTimeseries.push(...timeseries);
       date = addDays(date, 1);
     }
     this.logger.info({ count: dailyTimeseries.length }, 'Daily points fetched');
-    return { metricsData: dailyTimeseries, fitbitSleepLogs: sleepLogParams };
+    return { metricsData: dailyTimeseries, googleSleepLogs };
   }
 
   async scrapeSleeperData(): Promise<void> {
     this.logger.info('Scraping sleeper data');
 
-    const fitbitRefreshToken = await getFitbitRefreshToken(this.sleeper.sleeperId);
-    if (config.fitbitClientId && config.fitbitClientSecret && fitbitRefreshToken) {
-      this.fitbitApi = new Fitbit({ sleeperId: this.sleeper.sleeperId, logger: this.logger });
+    const googleRefreshToken = await getGoogleRefreshToken(this.sleeper.sleeperId);
+    if (config.googleClientId && config.googleClientSecret && googleRefreshToken) {
+      this.googleHealthApi = new GoogleHealth({
+        sleeperId: this.sleeper.sleeperId,
+        logger: this.logger,
+        clientId: config.googleClientId,
+        clientSecret: config.googleClientSecret,
+      });
     } else {
-      this.logger.info('Missing Fitbit configuration, skipping Fitbit reporting for this sleeper');
+      this.logger.info(
+        'Missing Google Health configuration, skipping Google Health reporting for this sleeper',
+      );
     }
 
     let lastDate: Date | undefined;
@@ -325,6 +382,6 @@ export class SleeperScraper {
       await pushTimeseries(timeseries, remoteWriteConfig);
     }
 
-    await this.publishSleepSessions(scrapedSessions.fitbitSleepLogs);
+    await this.publishSleepSessions(scrapedSessions.googleSleepLogs);
   }
 }
