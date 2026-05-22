@@ -231,7 +231,7 @@ export class SleeperScraper {
               type: field.type,
               startTime: new TZDate(stageTime, 'UTC').toISOString(),
               endTime: new TZDate(endTime, 'UTC').toISOString(),
-              // Required!
+              // Required! TODO: fix timezone, not working as expected
               startUtcOffset: '0s',
               endUtcOffset: '0s',
             };
@@ -242,7 +242,7 @@ export class SleeperScraper {
           interval: {
             startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
             endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
-            // Required!
+            // Required! TODO: fix timezone, not working as expected
             startUtcOffset: '0s',
             endUtcOffset: '0s',
           },

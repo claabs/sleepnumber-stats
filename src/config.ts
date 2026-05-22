@@ -19,6 +19,7 @@ export const SleepConfig = z.object({
   googleRedirectUri: z.url().optional(),
   googleClientId: z.string().optional(),
   googleClientSecret: z.string().optional(),
+  deleteGoogleHealthRecords: z.boolean().default(false),
   port: z.number().min(1).max(65535).default(3000),
   runOnStartup: z.boolean().default(false),
   runOnce: z.boolean().default(false),
