@@ -1,12 +1,12 @@
 # SleepNumber Stats
 
-A Node.js/TypeScript application for collecting and storing SleepNumber bed statistics in Victoria Metrics and sending data to Fitbit.
+A Node.js/TypeScript application for collecting and storing SleepNumber bed statistics in Victoria Metrics and sending data to Google Health.
 
 ## Features
 
 - Collects nightly sleep data from SleepNumber API
 - Stores data in Victoria Metrics
-- Optionally sends sleep sessions to Fitbit
+- Optionally sends sleep sessions to Google Health
 
 ## Quick Start (Docker)
 
@@ -31,7 +31,7 @@ services:
     environment:
       TZ: "America/New_York"
     ports:
-      - 3000:3000 # optional, for Fitbit setup
+      - 3000:3000 # optional, for Google Health setup
     volumes:
       - ./config:/app/config
     restart: unless-stopped
@@ -50,23 +50,23 @@ All application configuration is provided via a `config.json` file. The optional
 
 ### Configuration Reference
 
-| Key                          | Description                                                        | Default     | Example                              |
-|------------------------------|--------------------------------------------------------------------|-------------|--------------------------------------|
-| sleepNumberEmail             | SleepNumber account email                                          | (required)  | "<your@email.com>"                     |
-| sleepNumberPassword          | SleepNumber account password                                       | (required)  | "yourpassword"                       |
-| victoriaMetricsUrl           | Victoria Metrics server URL                                        | (required)  | "<http://172.17.0.1:8428>"             |
-| victoriaMetricsAuth.username | Victoria Metrics username                                          | (optional)  | "admin"                              |
-| victoriaMetricsAuth.password | Victoria Metrics password                                          | (optional)  | "passwort"                           |
-| deleteMetrics                | If true, deletes all existing data previously stored before ingest | false       | true                                 |
-| tz                           | Timezone for scheduling                                            | "UTC"       | "America/New_York"                   |
-| logLevel                     | Pino logger level (trace, debug, info, etc.)                       | "info"      | "debug"                              |
-| fitbitRedirectUri            | Public HTTPS callback URL for Fitbit OAuth2                        | (optional)  | "<https://sleep.example.com/callback>" |
-| fitbitClientId               | Fitbit developer app client ID                                     | (optional)  | "12ABCD"                             |
-| fitbitClientSecret           | Fitbit developer app client secret                                 | (optional)  | "abcdef1234567890abcdef1234567890"   |
-| port                         | Port for the web server (Fitbit setup)                             | 3000        | 3001                                 |
-| runOnStartup                 | When true, the container runs immediately on startup               | false       | true                                 |
-| runOnce                      | When true, the container runs once and does not schedule           | false       | true                                 |
-| schedule                     | Cron syntax schedule for when the job should run                   | 15 10 ** * | 0 12 ** *                           |
+| Key                          | Description                                                        | Default    | Example                                |
+|------------------------------|--------------------------------------------------------------------|------------|----------------------------------------|
+| sleepNumberEmail             | SleepNumber account email                                          | (required) | "<your@email.com>"                     |
+| sleepNumberPassword          | SleepNumber account password                                       | (required) | "yourpassword"                         |
+| victoriaMetricsUrl           | Victoria Metrics server URL                                        | (required) | "<http://172.17.0.1:8428>"             |
+| victoriaMetricsAuth.username | Victoria Metrics username                                          | (optional) | "admin"                                |
+| victoriaMetricsAuth.password | Victoria Metrics password                                          | (optional) | "passwort"                             |
+| deleteMetrics                | If true, deletes all existing data previously stored before ingest | false      | true                                   |
+| tz                           | Timezone for scheduling                                            | "UTC"      | "America/New_York"                     |
+| logLevel                     | Pino logger level (trace, debug, info, etc.)                       | "info"     | "debug"                                |
+| googleRedirectUri            | Public HTTPS callback URL for Google OAuth2                        | (optional) | "<https://sleep.example.com/callback>" |
+| googleClientId               | Google Cloud credential client ID                                  | (optional) | "12ABCD"                               |
+| googleClientSecret           | Google Cloud credential client secret                              | (optional) | "abcdef1234567890abcdef1234567890"     |
+| port                         | Port for the web server (Google Health setup)                      | 3000       | 3001                                   |
+| runOnStartup                 | When true, the container runs immediately on startup               | false      | true                                   |
+| runOnce                      | When true, the container runs once and does not schedule           | false      | true                                   |
+| schedule                     | Cron syntax schedule for when the job should run                   | 15 10 ** * | 0 12 ** *                              |
 
 ### Example config.json
 
@@ -100,8 +100,8 @@ To enable the reporting of sleep data to your Google Health account (for syncing
 
 - Application type: **Web application**
 - Name: **sleepnumber-stats**
-- Authorized JavaScript origins: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` (e.g. `https://sleep.example.com`)
-- Authorized redirect URIs: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` + `/callback` (e.g. `https://sleep.example.com/callback`)
+- Authorized JavaScript origins: set to the origin of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com`)
+- Authorized redirect URIs: set to the value of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com/callback`)
 
 1. Add the Google Health options to your config:
 
@@ -123,6 +123,6 @@ To enable the reporting of sleep data to your Google Health account (for syncing
     ```
 
 1. Navigate to `/register` (e.g. `https://sleep.example.com/register`)
-1. Click the sleeper you'd like to associate with your Fitbit account and follow the Fitbit linking steps
+1. Click the sleeper you'd like to associate with your Google Health account and follow the Google Health linking steps
 1. CTRL-C in the terminal to exit the setup application
-1. The Fitbit data will be uploaded on your next scheduled run. You should see your Fitbit refresh token in `/app/config/tokens.json`.
+1. The Google Health data will be uploaded on your next scheduled run. You should see your Google refresh token in `/app/config/tokens.json`.
