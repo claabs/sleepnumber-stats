@@ -24,6 +24,20 @@ export type GoogleHealthSleepStageType =
   | 'ASLEEP'
   | 'RESTLESS';
 
+export interface GoogleHealthAxiosError extends Error {
+  code: number;
+  response: {
+    data?: {
+      error?: {
+        details?: {
+          metadata?: {
+            existing_resource_name?: string;
+          };
+        }[];
+      };
+    };
+  };
+}
 export class GoogleHealth {
   private logger: Logger;
 
@@ -124,10 +138,11 @@ export class GoogleHealth {
    * @returns The created sleep log response
    */
   public async createSleepLog(params: google.health_v4.Schema$Sleep): Promise<void> {
-    this.logger.info({ params }, 'Creating Google Health sleep log');
     const healthClient = await this.ensureHealthClient();
 
-    this.logger.debug({ params }, 'Google Health sleep log request');
+    const startDate = params.interval?.startTime;
+
+    this.logger.debug({ startDate }, 'Google Health create sleep log request');
     const createResp = await healthClient.users.dataTypes.dataPoints.create({
       parent: `users/me/dataTypes/sleep`,
       requestBody: {
@@ -146,6 +161,38 @@ export class GoogleHealth {
     );
   }
 
+  /**
+   * Overwrite an existing sleep log entry for the user.
+   * @param params Sleep log parameters (see Google Health API docs)
+   * @param name The name of the sleep log to overwrite
+   * @returns The updated sleep log response
+   */
+  public async overwriteSleepLog(
+    params: google.health_v4.Schema$Sleep,
+    name: string,
+  ): Promise<void> {
+    const healthClient = await this.ensureHealthClient();
+
+    const startDate = params.interval?.startTime;
+    this.logger.debug({ startDate, name }, 'Google Health patch sleep log request');
+    const createResp = await healthClient.users.dataTypes.dataPoints.patch({
+      name,
+      requestBody: {
+        dataSource: {
+          recordingMethod: 'PASSIVELY_MEASURED',
+        },
+        sleep: params,
+      },
+    });
+    this.logger.info(
+      {
+        name: createResp.data.response?.name,
+        startTime: createResp.data.response?.sleep?.interval?.startTime,
+      },
+      'Successfully patched Google Health sleep log',
+    );
+  }
+
   public async createSleepLogs(paramsArray: google.health_v4.Schema$Sleep[]): Promise<void> {
     /* eslint-disable no-restricted-syntax, no-await-in-loop */
     if (config.deleteGoogleHealthRecords) {
@@ -160,7 +207,14 @@ export class GoogleHealth {
         await this.createSleepLog(params);
       } catch (err) {
         if (err instanceof Error && 'code' in err && err.code === 409) {
-          this.logger.warn('Sleep log already exists in Google Health, skipping');
+          const existingLogName = (err as GoogleHealthAxiosError).response?.data?.error
+            ?.details?.[0]?.metadata?.existing_resource_name;
+          if (existingLogName && config.deleteGoogleHealthRecords) {
+            this.logger.warn('Sleep log already exists in Google Health, overwriting');
+            await this.overwriteSleepLog(params, existingLogName);
+          } else {
+            this.logger.warn('Sleep log already exists in Google Health, skipping');
+          }
         } else {
           this.logger.error({ err, params }, 'Error creating Google Health sleep log');
           throw err;

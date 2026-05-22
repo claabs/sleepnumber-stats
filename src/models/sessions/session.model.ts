@@ -73,11 +73,19 @@ export interface BedExit {
   bedExitTime: string;
 }
 
+export enum SliceType {
+  // HiddenSlice = 0,
+  OutOfBed = 1,
+  Restless = 2,
+  Restful = 3,
+  FallAsleep = 4,
+}
+
 export interface Slice {
   outOfBedTime: number;
   restfulTime: number;
   restlessTime: number;
-  type: number;
+  type: SliceType;
 }
 
 export interface SnoreLevelChanges {

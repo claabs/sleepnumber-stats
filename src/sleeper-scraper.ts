@@ -14,6 +14,7 @@ import { pushTimeseries } from 'prometheus-remote-write';
 
 import { config } from './config.ts';
 import { GoogleHealth } from './google-health.ts';
+import { SliceType } from './models/sessions/session.model.ts';
 import { getGoogleRefreshToken } from './token-store.ts';
 
 import type google from '@googleapis/health';
@@ -71,6 +72,37 @@ function getUtcOffset(date: Date): string {
   const offsetMinutes = date.getTimezoneOffset();
   const offsetSeconds = offsetMinutes * -60; // Google wants inverted offset
   return `${offsetSeconds.toFixed(0)}s`;
+}
+
+const sliceTypeToGoogleMap: Record<SliceType, GoogleHealthSleepStageType> = {
+  [SliceType.OutOfBed]: 'AWAKE',
+  [SliceType.FallAsleep]: 'AWAKE',
+  [SliceType.Restless]: 'RESTLESS',
+  [SliceType.Restful]: 'ASLEEP',
+};
+
+interface RunningSlice {
+  sliceType: SliceType;
+  startTime: TZDate;
+  durationSeconds: number;
+}
+
+function runningSliceToStage(runningSlice: RunningSlice): {
+  stage: google.health_v4.Schema$SleepStage;
+  endTime: TZDate;
+} {
+  const endTime = addSeconds(runningSlice.startTime, runningSlice.durationSeconds);
+  return {
+    endTime,
+    stage: {
+      type: sliceTypeToGoogleMap[runningSlice.sliceType],
+      startTime: runningSlice.startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      // Required!
+      startUtcOffset: getUtcOffset(runningSlice.startTime),
+      endUtcOffset: getUtcOffset(endTime),
+    },
+  };
 }
 
 export class SleeperScraper {
@@ -210,40 +242,33 @@ export class SleeperScraper {
           { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
           'Creating sleep session record',
         );
-        const stageFields: { value: number; type: GoogleHealthSleepStageType }[] = [
-          {
-            value: longestSession.outOfBed,
-            type: 'AWAKE',
-          },
-          {
-            value: longestSession.fallAsleepPeriod,
-            type: 'AWAKE',
-          },
-          {
-            value: longestSession.restless,
-            type: 'RESTLESS',
-          },
-          {
-            value: longestSession.restful,
-            type: 'ASLEEP',
-          },
-        ];
-        let stageTime = new TZDate(longestSession.startDate, this.timezone);
-        const stages: google.health_v4.Schema$SleepStage[] = stageFields
-          .filter((field) => field.value > 0)
-          .map((field) => {
-            const endTime = addSeconds(new TZDate(stageTime, this.timezone), field.value);
-            const stage: google.health_v4.Schema$SleepStage = {
-              type: field.type,
-              startTime: stageTime.toISOString(),
-              endTime: endTime.toISOString(),
-              // Required!
-              startUtcOffset: getUtcOffset(stageTime),
-              endUtcOffset: getUtcOffset(endTime),
+        const stages: google.health_v4.Schema$SleepStage[] = [];
+
+        let runningSlice: RunningSlice | undefined;
+        // eslint-disable-next-line no-restricted-syntax
+        for (const slice of longestSession.sliceList) {
+          if (slice.type === runningSlice?.sliceType) {
+            runningSlice.durationSeconds +=
+              slice.outOfBedTime + slice.restfulTime + slice.restlessTime;
+          } else {
+            // close out existing running slice
+            let sliceStart = sessionStartDate;
+            if (runningSlice) {
+              const { stage, endTime } = runningSliceToStage(runningSlice);
+              stages.push(stage);
+              sliceStart = endTime;
+            }
+            // create new running slice
+            runningSlice = {
+              sliceType: slice.type,
+              startTime: sliceStart,
+              durationSeconds: slice.outOfBedTime + slice.restfulTime + slice.restlessTime,
             };
-            stageTime = endTime;
-            return stage;
-          });
+          }
+        }
+        // close out final running slice
+        if (runningSlice) stages.push(runningSliceToStage(runningSlice).stage);
+
         const sleepSession: google.health_v4.Schema$Sleep = {
           interval: {
             startTime: sessionStartDate.toISOString(),
@@ -288,7 +313,7 @@ export class SleeperScraper {
         dateString,
         'M1',
         this.sleeper.sleeperId,
-        false,
+        !!this.googleHealthApi, // Only fetch slices if we have Google Health configured
       );
       googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
       const points = this.createTimeseries(sleepDataResp);
@@ -317,7 +342,7 @@ export class SleeperScraper {
         dateString,
         'D1',
         this.sleeper.sleeperId,
-        false,
+        !!this.googleHealthApi, // Only fetch slices if we have Google Health configured
       );
       const timeseries = this.createTimeseries(sleepDataResp);
       googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
