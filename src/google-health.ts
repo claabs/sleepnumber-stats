@@ -12,11 +12,6 @@ export interface GoogleHealthProps {
   clientSecret: string;
 }
 
-interface EnsureHealthClientResponse {
-  healthClient: google.health_v4.Health;
-  healthUserId: string;
-}
-
 /**
  * https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints#sleep.sleepstagetype
  */
@@ -38,8 +33,6 @@ export class GoogleHealth {
 
   private clientSecret: string;
 
-  private googleHealthUserId?: string;
-
   private healthClient?: google.health_v4.Health;
 
   constructor(props: GoogleHealthProps) {
@@ -52,15 +45,12 @@ export class GoogleHealth {
   /**
    * Ensure access token is set and valid, fetch using refresh token if needed
    */
-  private async ensureHealthClient(): Promise<EnsureHealthClientResponse> {
+  private async ensureHealthClient(): Promise<google.health_v4.Health> {
     this.logger.trace('Ensuring Google Health token');
 
-    if (this.googleHealthUserId && this.healthClient) {
+    if (this.healthClient) {
       this.logger.trace('OAuth2 client already setup');
-      return {
-        healthClient: this.healthClient,
-        healthUserId: this.googleHealthUserId,
-      };
+      return this.healthClient;
     }
 
     const refreshToken = await getGoogleRefreshToken(this.sleeperId);
@@ -79,16 +69,7 @@ export class GoogleHealth {
 
     this.healthClient = new google.health_v4.Health({ auth: oAuth2Client });
 
-    const profileResp = await this.healthClient.users.getIdentity({ name: 'users/me/identity' });
-    const { healthUserId } = profileResp.data;
-    if (!healthUserId) {
-      throw new Error('Failed to obtain user health ID from Google Health user profile');
-    }
-    this.googleHealthUserId = healthUserId;
-    return {
-      healthClient: this.healthClient,
-      healthUserId: this.googleHealthUserId,
-    };
+    return this.healthClient;
   }
 
   /**
@@ -96,7 +77,7 @@ export class GoogleHealth {
    */
   private async purgeAllSleepLogs(): Promise<void> {
     this.logger.info('Purging all existing Google Health sleep logs');
-    const { healthClient } = await this.ensureHealthClient();
+    const healthClient = await this.ensureHealthClient();
 
     let nextPageToken: string | undefined;
     const sleepLogNames: string[] = [];
@@ -115,17 +96,26 @@ export class GoogleHealth {
           .filter((name): name is string => !!name) ?? []),
       );
     } while (nextPageToken);
+    if (!sleepLogNames.length) {
+      this.logger.info('No existing Google Health sleep logs found to delete');
+      return;
+    }
     this.logger.debug('Deleting Google Health sleep logs');
-    await healthClient.users.dataTypes.dataPoints.batchDelete({
-      parent: `users/me/dataTypes/sleep`,
-      requestBody: {
-        names: sleepLogNames,
-      },
-    });
-    this.logger.debug(
-      { count: sleepLogNames.length },
-      'Successfully deleted Google Health sleep logs',
-    );
+    try {
+      const deleteResp = await healthClient.users.dataTypes.dataPoints.batchDelete({
+        parent: `users/me/dataTypes/sleep`,
+        requestBody: {
+          names: sleepLogNames,
+        },
+      });
+      this.logger.debug(
+        { count: sleepLogNames.length, done: deleteResp.data.done },
+        'Successfully deleted Google Health sleep logs',
+      );
+    } catch (err) {
+      this.logger.error({ err }, 'Error deleting Google Health sleep logs');
+      throw err;
+    }
   }
 
   /**
@@ -135,10 +125,10 @@ export class GoogleHealth {
    */
   public async createSleepLog(params: google.health_v4.Schema$Sleep): Promise<void> {
     this.logger.info({ params }, 'Creating Google Health sleep log');
-    const { healthClient, healthUserId } = await this.ensureHealthClient();
+    const healthClient = await this.ensureHealthClient();
 
     this.logger.debug({ params }, 'Google Health sleep log request');
-    await healthClient.users.dataTypes.dataPoints.create({
+    const createResp = await healthClient.users.dataTypes.dataPoints.create({
       parent: `users/me/dataTypes/sleep`,
       requestBody: {
         dataSource: {
@@ -147,6 +137,13 @@ export class GoogleHealth {
         sleep: params,
       },
     });
+    this.logger.info(
+      {
+        name: createResp.data.response?.name,
+        startTime: createResp.data.response?.sleep?.interval?.startTime,
+      },
+      'Successfully created Google Health sleep log',
+    );
   }
 
   public async createSleepLogs(paramsArray: google.health_v4.Schema$Sleep[]): Promise<void> {

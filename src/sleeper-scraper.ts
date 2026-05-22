@@ -6,6 +6,7 @@ import {
   addSeconds,
   differenceInDays,
   format,
+  getMinutes,
   startOfMonth,
   subMonths,
   subYears,
@@ -66,6 +67,12 @@ export const METRIC_NAMES: MetricName[] = [
   'sleepnumber_stats_sleep_quotient',
   'sleepnumber_stats_total_sleep_session_time',
 ];
+
+function getUtcOffset(date: Date): string {
+  const offsetMinutes = date.getTimezoneOffset();
+  const offsetSeconds = offsetMinutes * -60; // Google wants inverted offset
+  return `${offsetSeconds.toFixed(0)}s`;
+}
 
 export class SleeperScraper {
   private logger: Logger;
@@ -229,22 +236,22 @@ export class SleeperScraper {
             const endTime = addSeconds(new TZDate(stageTime, this.timezone), field.value);
             const stage: google.health_v4.Schema$SleepStage = {
               type: field.type,
-              startTime: new TZDate(stageTime, 'UTC').toISOString(),
-              endTime: new TZDate(endTime, 'UTC').toISOString(),
-              // Required! TODO: fix timezone, not working as expected
-              startUtcOffset: '0s',
-              endUtcOffset: '0s',
+              startTime: stageTime.toISOString(),
+              endTime: endTime.toISOString(),
+              // Required!
+              startUtcOffset: getUtcOffset(stageTime),
+              endUtcOffset: getUtcOffset(endTime),
             };
             stageTime = endTime;
             return stage;
           });
         const sleepSession: google.health_v4.Schema$Sleep = {
           interval: {
-            startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
-            endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
-            // Required! TODO: fix timezone, not working as expected
-            startUtcOffset: '0s',
-            endUtcOffset: '0s',
+            startTime: sessionStartDate.toISOString(),
+            endTime: sessionEndDate.toISOString(),
+            // Required!
+            startUtcOffset: getUtcOffset(sessionStartDate),
+            endUtcOffset: getUtcOffset(sessionEndDate),
           },
           stages,
           /**
