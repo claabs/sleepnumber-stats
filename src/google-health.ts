@@ -11,6 +11,11 @@ export interface GoogleHealthProps {
   clientSecret: string;
 }
 
+interface EnsureHealthClientResponse {
+  healthClient: google.health_v4.Health;
+  healthUserId: string;
+}
+
 /**
  * https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints#sleep.sleepstagetype
  */
@@ -28,26 +33,33 @@ export class GoogleHealth {
 
   private sleeperId: string;
 
-  private oAuth2Client;
+  private clientId: string;
+
+  private clientSecret: string;
+
+  private googleHealthUserId?: string;
+
+  private healthClient?: google.health_v4.Health;
 
   constructor(props: GoogleHealthProps) {
     this.logger = props.logger;
     this.sleeperId = props.sleeperId;
-    this.oAuth2Client = new google.auth.OAuth2({
-      clientId: props.clientId,
-      clientSecret: props.clientSecret,
-    });
+    this.clientId = props.clientId;
+    this.clientSecret = props.clientSecret;
   }
 
   /**
    * Ensure access token is set and valid, fetch using refresh token if needed
    */
-  private async ensureValidToken(): Promise<void> {
+  private async ensureHealthClient(): Promise<EnsureHealthClientResponse> {
     this.logger.trace('Ensuring Google Health token');
 
-    if (this.oAuth2Client.credentials.refresh_token) {
-      this.logger.trace('OAuth2 client already has refresh token');
-      return;
+    if (this.googleHealthUserId && this.healthClient) {
+      this.logger.trace('OAuth2 client already setup');
+      return {
+        healthClient: this.healthClient,
+        healthUserId: this.googleHealthUserId,
+      };
     }
 
     const refreshToken = await getGoogleRefreshToken(this.sleeperId);
@@ -58,10 +70,24 @@ export class GoogleHealth {
       );
     }
     this.logger.trace('Setting Google Health refresh token on OAuth2 client');
-    this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
-    const { token: accessToken } = await this.oAuth2Client.getAccessToken();
+    const oAuth2Client = new google.auth.OAuth2({
+      clientId: this.clientId,
+      clientSecret: this.clientSecret,
+    });
+    oAuth2Client.setCredentials({ refresh_token: refreshToken });
 
-    if (!accessToken) throw new Error('Failed to obtain access token from Google Health API');
+    this.healthClient = new google.health_v4.Health({ auth: oAuth2Client });
+
+    const profileResp = await this.healthClient.users.getIdentity({ name: 'users/me/identity' });
+    const { healthUserId } = profileResp.data;
+    if (!healthUserId) {
+      throw new Error('Failed to obtain user health ID from Google Health user profile');
+    }
+    this.googleHealthUserId = healthUserId;
+    return {
+      healthClient: this.healthClient,
+      healthUserId: this.googleHealthUserId,
+    };
   }
 
   /**
@@ -71,17 +97,16 @@ export class GoogleHealth {
    */
   public async createSleepLog(params: google.health_v4.Schema$Sleep): Promise<void> {
     this.logger.info({ params }, 'Creating Google Health sleep log');
-    await this.ensureValidToken();
-    const health = new google.health_v4.Health({ auth: this.oAuth2Client });
+    const { healthClient, healthUserId } = await this.ensureHealthClient();
+
     this.logger.debug({ params }, 'Google Health sleep log request');
-    await health.users.dataTypes.dataPoints.create({
+    await healthClient.users.dataTypes.dataPoints.create({
+      parent: `users/${healthUserId ?? 'me'}/dataTypes/sleep`,
       requestBody: {
         dataSource: {
           recordingMethod: 'PASSIVELY_MEASURED',
         },
-        sleep: {
-          ...params,
-        },
+        sleep: params,
       },
     });
   }
@@ -96,8 +121,12 @@ export class GoogleHealth {
       try {
         await this.createSleepLog(params);
       } catch (err) {
-        this.logger.error({ err, params }, 'Error creating Google Health sleep log');
-        throw err;
+        if (err instanceof Error && 'code' in err && err.code === 409) {
+          this.logger.warn('Sleep log already exists in Google Health, skipping');
+        } else {
+          this.logger.error({ err, params }, 'Error creating Google Health sleep log');
+          throw err;
+        }
       }
     }
     this.logger.info('Batch Google Health sleep log upload finished');

@@ -91,16 +91,18 @@ To enable the reporting of sleep data to your Google Health account (for syncing
 
 1. Setup an HTTPS domain reverse proxied to your container
 1. Create a project in the Google Cloud Console:
-    1. Create an app [on the Google Cloud Console](https://console.cloud.google.com/welcome?organizationId=0)
-    1. Go to the [Google Health](https://console.cloud.google.com/marketplace/product/google/health.googleapis.com) application and click **Enable**
-    1. Click [**Credentials**](https://console.cloud.google.com/apis/credentials) in the navigation menu
-    1. Click **Create credentials** and then **OAuth client ID**
-    1. Click **Configure consent screen** and complete the form
-    1. Click **Create OAuth client**
-      - Application type: **Web application**
-      - Name: **sleepnumber-stats**
-      - Authorized JavaScript origins: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` (e.g. `https://sleep.example.com`)
-      - Authorized redirect URIs: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` + `/callback` (e.g. `https://sleep.example.com/callback`)
+1. Create an app [on the Google Cloud Console](https://console.cloud.google.com/welcome?organizationId=0)
+1. Go to the [Google Health](https://console.cloud.google.com/marketplace/product/google/health.googleapis.com) application and click **Enable**
+1. Click [**Credentials**](https://console.cloud.google.com/apis/credentials) in the navigation menu
+1. Click **Create credentials** and then **OAuth client ID**
+1. Click **Configure consent screen** and complete the form
+1. Click **Create OAuth client**
+
+- Application type: **Web application**
+- Name: **sleepnumber-stats**
+- Authorized JavaScript origins: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` (e.g. `https://sleep.example.com`)
+- Authorized redirect URIs: set to the value of the HTTPS URL set in the config `fitbitBaseUrl` + `/callback` (e.g. `https://sleep.example.com/callback`)
+
 1. Add the Google Health options to your config:
 
     ```json
@@ -112,6 +114,7 @@ To enable the reporting of sleep data to your Google Health account (for syncing
     }
     ```
 
+1. Go to the [**Audience**](https://console.cloud.google.com/auth/audience) page, click  **Add users**, and enter the Google account email addresses of your test users.
 1. Open a terminal inside your running container and run `./setup.sh`:
 
     ```sh

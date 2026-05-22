@@ -13,7 +13,7 @@ import {
 import { pushTimeseries } from 'prometheus-remote-write';
 
 import { config } from './config.ts';
-import { GoogleHealth } from './google-health.js';
+import { GoogleHealth } from './google-health.ts';
 import { getGoogleRefreshToken } from './token-store.ts';
 
 import type google from '@googleapis/health';
@@ -21,7 +21,7 @@ import type { Logger } from 'pino';
 import type { PrometheusDriver, RangeVector } from 'prometheus-query';
 import type { Options, Timeseries } from 'prometheus-remote-write';
 
-import type { GoogleHealthSleepStageType } from './google-health.js';
+import type { GoogleHealthSleepStageType } from './google-health.ts';
 import type { Bed } from './models/bed/bed.model.ts';
 import type { SleepDataStructure } from './models/sessions/sleep-data.model.ts';
 import type { Sleeper } from './models/sleeper/sleeper.model.ts';
@@ -231,6 +231,9 @@ export class SleeperScraper {
               type: field.type,
               startTime: new TZDate(stageTime, 'UTC').toISOString(),
               endTime: new TZDate(endTime, 'UTC').toISOString(),
+              // Required!
+              startUtcOffset: '0s',
+              endUtcOffset: '0s',
             };
             stageTime = endTime;
             return stage;
@@ -239,6 +242,9 @@ export class SleeperScraper {
           interval: {
             startTime: new TZDate(sessionStartDate, 'UTC').toISOString(),
             endTime: new TZDate(sessionEndDate, 'UTC').toISOString(),
+            // Required!
+            startUtcOffset: '0s',
+            endUtcOffset: '0s',
           },
           stages,
           /**
