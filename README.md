@@ -58,6 +58,7 @@ All application configuration is provided via a `config.json` file. The optional
 | victoriaMetricsAuth.username | Victoria Metrics username                                          | (optional) | "admin"                                |
 | victoriaMetricsAuth.password | Victoria Metrics password                                          | (optional) | "passwort"                             |
 | deleteMetrics                | If true, deletes all existing data previously stored before ingest | false      | true                                   |
+| overwriteGoogleHealthRecords | If true, overwrites existing Google Health sleep on conflict       | false      | true                                   |
 | tz                           | Timezone for scheduling                                            | "UTC"      | "America/New_York"                     |
 | logLevel                     | Pino logger level (trace, debug, info, etc.)                       | "info"     | "debug"                                |
 | googleRedirectUri            | Public HTTPS callback URL for Google OAuth2                        | (optional) | "<https://sleep.example.com/callback>" |
@@ -98,10 +99,10 @@ To enable the reporting of sleep data to your Google Health account (for syncing
 1. Click **Configure consent screen** and complete the form
 1. Click **Create OAuth client**
 
-- Application type: **Web application**
-- Name: **sleepnumber-stats**
-- Authorized JavaScript origins: set to the origin of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com`)
-- Authorized redirect URIs: set to the value of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com/callback`)
+   - Application type: **Web application**
+   - Name: **sleepnumber-stats**
+   - Authorized JavaScript origins: set to the origin of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com`)
+   - Authorized redirect URIs: set to the value of the HTTPS URL set in the config `googleRedirectUri` (e.g. `https://sleep.example.com/callback`)
 
 1. Add the Google Health options to your config:
 

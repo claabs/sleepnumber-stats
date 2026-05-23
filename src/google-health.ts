@@ -160,7 +160,7 @@ export class GoogleHealth {
         if (err instanceof Error && 'code' in err && err.code === 409) {
           const existingLogName = (err as GoogleHealthAxiosError).response?.data?.error
             ?.details?.[0]?.metadata?.existing_resource_name;
-          if (existingLogName && config.deleteGoogleHealthRecords) {
+          if (existingLogName && config.overwriteGoogleHealthRecords) {
             this.logger.warn('Sleep log already exists in Google Health, overwriting');
             await this.overwriteSleepLog(params, existingLogName);
           } else {
