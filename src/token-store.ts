@@ -7,7 +7,7 @@ const TOKENS_FILE = path.resolve(configPath, 'tokens.json');
 
 interface TokenStore {
   sleepNumber?: Record<string, string>; // email -> refreshToken
-  fitbit?: Record<string, string>; // sleeperId -> refreshToken
+  google?: Record<string, string>; // sleeperId -> refreshToken
 }
 
 async function readTokens(): Promise<TokenStore> {
@@ -38,17 +38,17 @@ export async function setSleepNumberRefreshToken(
   await writeTokens(tokens);
 }
 
-export async function getFitbitRefreshToken(sleeperId: string): Promise<string | undefined> {
+export async function getGoogleRefreshToken(sleeperId: string): Promise<string | undefined> {
   const tokens = await readTokens();
-  return tokens.fitbit?.[sleeperId];
+  return tokens.google?.[sleeperId];
 }
 
-export async function setFitbitRefreshToken(
+export async function setGoogleRefreshToken(
   sleeperId: string,
   refreshToken: string,
 ): Promise<void> {
   const tokens = await readTokens();
-  tokens.fitbit ??= {};
-  tokens.fitbit[sleeperId] = refreshToken;
+  tokens.google ??= {};
+  tokens.google[sleeperId] = refreshToken;
   await writeTokens(tokens);
 }

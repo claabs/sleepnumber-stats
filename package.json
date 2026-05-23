@@ -1,6 +1,6 @@
 {
   "name": "sleepnumber-stats",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "src/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@date-fns/tz": "^1.2.0",
+    "@googleapis/health": "^1.0.0",
     "@hono/node-server": "^1.19.4",
     "date-fns": "^4.1.0",
     "dotenv": "^17.1.0",

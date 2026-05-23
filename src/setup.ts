@@ -1,23 +1,25 @@
+import google from '@googleapis/health';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 
 import { config } from './config.ts';
-import { getFitbitAccessToken } from './fitbit.ts';
 import { logger } from './logger.ts';
 import { SleepNumberAPI } from './sleepnumber-api.ts';
-import { setFitbitRefreshToken } from './token-store.ts';
+import { setGoogleRefreshToken } from './token-store.ts';
 
 import type { Sleeper } from './models/sleeper/sleeper.model.ts';
 
-const FITBIT_AUTHORIZE_URL = 'https://www.fitbit.com/oauth2/authorize';
-
-const clientId = config.fitbitClientId;
-const clientSecret = config.fitbitClientSecret;
-const redirectUri = config.fitbitRedirectUri;
+const clientId = config.googleClientId;
+const clientSecret = config.googleClientSecret;
+const redirectUri = config.googleRedirectUri;
 
 if (!clientId || !clientSecret || !redirectUri) {
-  throw new Error('Fitbit client ID, client secret, and redirect URI must be set in config.json');
+  throw new Error(
+    'Google Health client ID, client secret, and redirect URI must be set in config.json',
+  );
 }
+
+const oauth2Client = new google.auth.OAuth2({ clientId, clientSecret, redirectUri });
 
 const sleepApi = new SleepNumberAPI({
   email: config.sleepNumberEmail,
@@ -38,10 +40,10 @@ const registerHtml = `<!DOCTYPE html>
     <html lang="en">
     <head>
       <meta charset="UTF-8">
-      <title>Register Fitbit Sleeper</title>
+      <title>Register Google Health Sleeper</title>
     </head>
     <body>
-      <h1>Select a Sleeper to Register with Fitbit</h1>
+      <h1>Select a Sleeper to Register with Google Health</h1>
       <ul>
         ${sleepers
           .map(
@@ -53,44 +55,40 @@ const registerHtml = `<!DOCTYPE html>
     </body>
     </html>`;
 
-const fitbitApp = new Hono();
+const googleHealthApp = new Hono();
 
-fitbitApp.get('/register', (c) => {
+googleHealthApp.get('/register', (c) => {
   return c.html(registerHtml);
 });
 
-fitbitApp.get('/register/:sleeperId', (c) => {
+googleHealthApp.get('/register/:sleeperId', (c) => {
   const sleeperId = c.req.param('sleeperId');
-  const url = new URL(FITBIT_AUTHORIZE_URL);
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'sleep profile');
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('state', sleeperId);
-  return c.redirect(url.toString());
+  const authorizeUrl = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['profile', 'https://www.googleapis.com/auth/googlehealth.sleep'],
+    state: sleeperId,
+  });
+  return c.redirect(authorizeUrl);
 });
 
-fitbitApp.get('/callback', async (c) => {
+googleHealthApp.get('/callback', async (c) => {
   const sleeperId = c.req.query('state');
   const code = c.req.query('code');
   if (!code) return c.text('Missing code', 400);
   if (!sleeperId) return c.text('Missing state', 400);
 
   try {
-    const resp = await getFitbitAccessToken({
-      client_id: clientId,
-      grant_type: 'authorization_code',
-      redirect_uri: redirectUri,
-      code,
-    });
+    const { tokens } = await oauth2Client.getToken(code);
+    if (!tokens.refresh_token) {
+      return c.text('Missing refresh token', 403);
+    }
+    await setGoogleRefreshToken(sleeperId, tokens.refresh_token);
 
-    await setFitbitRefreshToken(sleeperId, resp.refresh_token);
-
-    return c.text('Fitbit authorization successful!');
+    return c.text('Google Health authorization successful!');
   } catch (err) {
     logger.error({ err }, 'Error exchanging code for tokens');
     return c.text('Error exchanging code', 500);
   }
 });
 
-serve({ fetch: fitbitApp.fetch, port: config.port });
+serve({ fetch: googleHealthApp.fetch, port: config.port });
