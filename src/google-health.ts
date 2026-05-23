@@ -87,52 +87,6 @@ export class GoogleHealth {
   }
 
   /**
-   * Just soft deletes the logs. Doesn't solve 409s immediately.
-   */
-  private async purgeAllSleepLogs(): Promise<void> {
-    this.logger.info('Purging all existing Google Health sleep logs');
-    const healthClient = await this.ensureHealthClient();
-
-    let nextPageToken: string | undefined;
-    const sleepLogNames: string[] = [];
-    do {
-      this.logger.debug({ nextPageToken }, 'Listing Google Health sleep logs for deletion');
-      // eslint-disable-next-line no-await-in-loop
-      const listResp = await healthClient.users.dataTypes.dataPoints.list({
-        parent: `users/me/dataTypes/sleep`,
-        pageSize: 25, // Max page size for sleep
-        pageToken: nextPageToken,
-      });
-      nextPageToken = listResp.data.nextPageToken ?? undefined;
-      sleepLogNames.push(
-        ...(listResp.data.dataPoints
-          ?.map((dp) => dp.name)
-          .filter((name): name is string => !!name) ?? []),
-      );
-    } while (nextPageToken);
-    if (!sleepLogNames.length) {
-      this.logger.info('No existing Google Health sleep logs found to delete');
-      return;
-    }
-    this.logger.debug('Deleting Google Health sleep logs');
-    try {
-      const deleteResp = await healthClient.users.dataTypes.dataPoints.batchDelete({
-        parent: `users/me/dataTypes/sleep`,
-        requestBody: {
-          names: sleepLogNames,
-        },
-      });
-      this.logger.debug(
-        { count: sleepLogNames.length, done: deleteResp.data.done },
-        'Successfully deleted Google Health sleep logs',
-      );
-    } catch (err) {
-      this.logger.error({ err }, 'Error deleting Google Health sleep logs');
-      throw err;
-    }
-  }
-
-  /**
    * Create a sleep log entry for the user.
    * @param params Sleep log parameters (see Google Health API docs)
    * @returns The created sleep log response
@@ -195,9 +149,6 @@ export class GoogleHealth {
 
   public async createSleepLogs(paramsArray: google.health_v4.Schema$Sleep[]): Promise<void> {
     /* eslint-disable no-restricted-syntax, no-await-in-loop */
-    if (config.deleteGoogleHealthRecords) {
-      await this.purgeAllSleepLogs();
-    }
     this.logger.info(
       { count: paramsArray.length },
       'Starting batch Google Health sleep log upload',
