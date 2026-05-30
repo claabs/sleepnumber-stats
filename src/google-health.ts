@@ -1,7 +1,7 @@
 import google from '@googleapis/health';
 
 import { config } from './config.ts';
-import { getGoogleRefreshToken } from './token-store.ts';
+import { getGoogleRefreshToken, setGoogleRefreshToken } from './token-store.ts';
 
 import type { Logger } from 'pino';
 
@@ -78,6 +78,23 @@ export class GoogleHealth {
     const oAuth2Client = new google.auth.OAuth2({
       clientId: this.clientId,
       clientSecret: this.clientSecret,
+    });
+    oAuth2Client.on('tokens', async (tokens) => {
+      this.logger.debug(
+        {
+          tokenType: tokens.token_type,
+          expiryDate: tokens.expiry_date,
+          scope: tokens.scope,
+          accessTokenLength: tokens.access_token?.length,
+          refreshTokenLength: tokens.refresh_token?.length,
+          idTokenLength: tokens.id_token?.length,
+        },
+        'New Google Health access token obtained',
+      );
+      if (tokens.refresh_token) {
+        this.logger.info('Received new Google Health refresh token, saving to token store');
+        await setGoogleRefreshToken(this.sleeperId, tokens.refresh_token);
+      }
     });
     oAuth2Client.setCredentials({ refresh_token: refreshToken });
 
