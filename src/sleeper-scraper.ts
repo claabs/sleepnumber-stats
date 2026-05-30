@@ -402,6 +402,8 @@ export class SleeperScraper {
       scrapedSessions = await this.getHistoricalData();
     }
 
+    await this.publishSleepSessions(scrapedSessions.googleSleepLogs);
+
     this.logger.info(
       { count: scrapedSessions.metricsData.length },
       'Points scraped. Writing to metrics database...',
@@ -418,7 +420,5 @@ export class SleeperScraper {
       );
       await pushTimeseries(timeseries, remoteWriteConfig);
     }
-
-    await this.publishSleepSessions(scrapedSessions.googleSleepLogs);
   }
 }
