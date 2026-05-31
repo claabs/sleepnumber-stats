@@ -65,7 +65,11 @@ googleHealthApp.get('/register/:sleeperId', (c) => {
   const sleeperId = c.req.param('sleeperId');
   const authorizeUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: ['profile', 'https://www.googleapis.com/auth/googlehealth.sleep'],
+    scope: [
+      'profile',
+      'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+      'https://www.googleapis.com/auth/googlehealth.sleep.writeonly',
+    ],
     state: sleeperId,
   });
   return c.redirect(authorizeUrl);

@@ -82,12 +82,10 @@ export class GoogleHealth {
     oAuth2Client.on('tokens', async (tokens) => {
       this.logger.debug(
         {
-          tokenType: tokens.token_type,
-          expiryDate: tokens.expiry_date,
-          scope: tokens.scope,
-          accessTokenLength: tokens.access_token?.length,
-          refreshTokenLength: tokens.refresh_token?.length,
-          idTokenLength: tokens.id_token?.length,
+          ...tokens,
+          access_token: tokens.access_token?.length,
+          refresh_token: tokens.refresh_token?.length,
+          id_token: tokens.id_token?.length,
         },
         'New Google Health access token obtained',
       );
