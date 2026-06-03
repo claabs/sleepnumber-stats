@@ -67,7 +67,7 @@ googleHealthApp.get('/register/:sleeperId', (c) => {
     access_type: 'offline',
     scope: [
       'profile',
-      'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+      'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.writeonly',
       'https://www.googleapis.com/auth/googlehealth.sleep.writeonly',
     ],
     state: sleeperId,

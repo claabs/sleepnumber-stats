@@ -36,9 +36,13 @@ export interface SleeperScraperProps {
   logger: Logger;
 }
 
-interface ScrapedSessions {
-  metricsData: Timeseries[];
+interface GoogleHealthLogs {
   googleSleepLogs: google.health_v4.Schema$Sleep[];
+  googleHeartRateLogs: google.health_v4.Schema$HeartRate[];
+  googleHeartRateVariabilityLogs: google.health_v4.Schema$HeartRateVariability[];
+}
+interface ScrapedSessions extends GoogleHealthLogs {
+  metricsData: Timeseries[];
 }
 
 type MetricName =
@@ -222,80 +226,118 @@ export class SleeperScraper {
     return series;
   }
 
-  private createGoogleSleepLogs(sleepData: SleepDataStructure): google.health_v4.Schema$Sleep[] {
+  private createGoogleHealthLogs(sleepData: SleepDataStructure): GoogleHealthLogs {
     this.logger.trace(
       { days: sleepData.sleepData.length },
-      'Creating sleep sessions from sleep data',
+      'Creating health sessions from sleep data',
     );
-    return sleepData.sleepData
-      .map((sleepDataDay) => {
-        const longestSession = sleepDataDay.sessions.find(
-          (session) => session.longest && session.isFinalized,
-        );
-        if (!longestSession) return null;
-        const sessionStartDate = new TZDate(longestSession.startDate, this.timezone);
-        const sessionEndDate = new TZDate(longestSession.endDate, this.timezone);
-        // Only include sessions within the last 30 days
-        if (differenceInDays(new Date(), sessionEndDate) > 30) return null;
 
-        this.logger.debug(
-          { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
-          'Creating sleep session record',
-        );
-        const stages: google.health_v4.Schema$SleepStage[] = [];
+    const googleHealthLogs: GoogleHealthLogs = {
+      googleSleepLogs: [],
+      googleHeartRateLogs: [],
+      googleHeartRateVariabilityLogs: [],
+    };
 
-        let runningSlice: RunningSlice | undefined;
-        // eslint-disable-next-line no-restricted-syntax
-        for (const slice of longestSession.sliceList) {
-          if (slice.type === runningSlice?.sliceType) {
-            runningSlice.durationSeconds +=
-              slice.outOfBedTime + slice.restfulTime + slice.restlessTime;
-          } else {
-            // close out existing running slice
-            let sliceStart = sessionStartDate;
-            if (runningSlice) {
-              const { stage, endTime } = runningSliceToStage(runningSlice);
-              stages.push(stage);
-              sliceStart = endTime;
-            }
-            // create new running slice
-            runningSlice = {
-              sliceType: slice.type,
-              startTime: sliceStart,
-              durationSeconds: slice.outOfBedTime + slice.restfulTime + slice.restlessTime,
-            };
+    // eslint-disable-next-line no-restricted-syntax
+    for (const sleepDataDay of sleepData.sleepData) {
+      const longestSession = sleepDataDay.sessions.find(
+        (session) => session.longest && session.isFinalized,
+      );
+      // eslint-disable-next-line no-continue
+      if (!longestSession) continue;
+      const sessionStartDate = new TZDate(longestSession.startDate, this.timezone);
+      const sessionEndDate = new TZDate(longestSession.endDate, this.timezone);
+      // Only include sessions within the last 30 days
+      // eslint-disable-next-line no-continue
+      if (differenceInDays(new Date(), sessionEndDate) > 30) continue;
+
+      this.logger.debug(
+        { endDate: longestSession.endDate, sleeperId: this.sleeper.sleeperId },
+        'Creating Google Health log for sleep session',
+      );
+      const stages: google.health_v4.Schema$SleepStage[] = [];
+
+      let runningSlice: RunningSlice | undefined;
+      // eslint-disable-next-line no-restricted-syntax
+      for (const slice of longestSession.sliceList) {
+        if (slice.type === runningSlice?.sliceType) {
+          runningSlice.durationSeconds +=
+            slice.outOfBedTime + slice.restfulTime + slice.restlessTime;
+        } else {
+          // close out existing running slice
+          let sliceStart = sessionStartDate;
+          if (runningSlice) {
+            const { stage, endTime } = runningSliceToStage(runningSlice);
+            stages.push(stage);
+            sliceStart = endTime;
           }
+          // create new running slice
+          runningSlice = {
+            sliceType: slice.type,
+            startTime: sliceStart,
+            durationSeconds: slice.outOfBedTime + slice.restfulTime + slice.restlessTime,
+          };
         }
-        // close out final running slice
-        if (runningSlice) stages.push(runningSliceToStage(runningSlice).stage);
+      }
+      // close out final running slice
+      if (runningSlice) stages.push(runningSliceToStage(runningSlice).stage);
 
-        const sleepSession: google.health_v4.Schema$Sleep = {
-          interval: {
-            startTime: sessionStartDate.toISOString(),
-            endTime: sessionEndDate.toISOString(),
-            // Required!
-            startUtcOffset: getUtcOffset(sessionStartDate),
-            endUtcOffset: getUtcOffset(sessionEndDate),
-          },
-          stages,
-          /**
-           * https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints#sleep.sleeptype
-           */
-          type: 'CLASSIC', // Classic sleep is a sleep with 3 stages types: AWAKE, RESTLESS and ASLEEP.
-        };
-        return sleepSession;
-      })
-      .filter((session) => session !== null);
+      const sleepSession: google.health_v4.Schema$Sleep = {
+        interval: {
+          startTime: sessionStartDate.toISOString(),
+          endTime: sessionEndDate.toISOString(),
+          // Required!
+          startUtcOffset: getUtcOffset(sessionStartDate),
+          endUtcOffset: getUtcOffset(sessionEndDate),
+        },
+        stages,
+        /**
+         * https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints#sleep.sleeptype
+         */
+        type: 'CLASSIC', // Classic sleep is a sleep with 3 stages types: AWAKE, RESTLESS and ASLEEP.
+      };
+      googleHealthLogs.googleSleepLogs.push(sleepSession);
+
+      const heartRateRecord: google.health_v4.Schema$HeartRate = {
+        sampleTime: {
+          physicalTime: sessionEndDate.toISOString(),
+          utcOffset: getUtcOffset(sessionEndDate),
+        },
+        metadata: {
+          motionContext: 'SEDENTARY',
+          sensorLocation: 'SENSOR_LOCATION_UNSPECIFIED',
+        },
+        beatsPerMinute: longestSession.avgHeartRate.toFixed(0),
+      };
+      googleHealthLogs.googleHeartRateLogs.push(heartRateRecord);
+
+      const heartRateVariabilityRecord: google.health_v4.Schema$HeartRateVariability = {
+        sampleTime: {
+          physicalTime: sessionEndDate.toISOString(),
+          utcOffset: getUtcOffset(sessionEndDate),
+        },
+        rootMeanSquareOfSuccessiveDifferencesMilliseconds: longestSession.hrv,
+      };
+      googleHealthLogs.googleHeartRateVariabilityLogs.push(heartRateVariabilityRecord);
+    }
+
+    return googleHealthLogs;
   }
 
-  private async publishSleepSessions(sleepLogs: google.health_v4.Schema$Sleep[]): Promise<void> {
+  private async publishGoogleSleepSessions(googleHealthLogs: GoogleHealthLogs): Promise<void> {
     if (!this.googleHealthApi) return;
-    if (!sleepLogs.length) return;
 
-    this.logger.debug({ count: sleepLogs.length }, 'Publishing sleep sessions to Google Health');
-    await this.googleHealthApi.createSleepLogs(sleepLogs);
+    this.logger.debug(
+      { count: googleHealthLogs.googleSleepLogs.length },
+      'Publishing sleep sessions logs to Google Health',
+    );
+    // await this.googleHealthApi.createSleepLogs(sleepLogs);
+    await this.googleHealthApi.createHeartRateLogs(googleHealthLogs.googleHeartRateLogs);
+    await this.googleHealthApi.createHeartRateVariabilityLogs(
+      googleHealthLogs.googleHeartRateVariabilityLogs,
+    );
     this.logger.info(
-      { count: sleepLogs.length },
+      { count: googleHealthLogs.googleSleepLogs.length },
       'Successfully published Google Health sleep log batch',
     );
   }
@@ -303,7 +345,11 @@ export class SleeperScraper {
   async getHistoricalData(): Promise<ScrapedSessions> {
     this.logger.info('Fetching historical sleep data');
     const historicalTimeseries: Timeseries[] = [];
-    const googleSleepLogs: google.health_v4.Schema$Sleep[] = [];
+    const allGoogleHealthLogs: GoogleHealthLogs = {
+      googleSleepLogs: [],
+      googleHeartRateLogs: [],
+      googleHeartRateVariabilityLogs: [],
+    };
     let currentDate = startOfMonth(new TZDate(new Date(), this.timezone));
 
     while (true) {
@@ -315,7 +361,12 @@ export class SleeperScraper {
         this.sleeper.sleeperId,
         !!this.googleHealthApi, // Only fetch slices if we have Google Health configured
       );
-      googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
+      const monthGoogleHealthLogs = this.createGoogleHealthLogs(sleepDataResp);
+      allGoogleHealthLogs.googleSleepLogs.push(...monthGoogleHealthLogs.googleSleepLogs);
+      allGoogleHealthLogs.googleHeartRateLogs.push(...monthGoogleHealthLogs.googleHeartRateLogs);
+      allGoogleHealthLogs.googleHeartRateVariabilityLogs.push(
+        ...monthGoogleHealthLogs.googleHeartRateVariabilityLogs,
+      );
       const points = this.createTimeseries(sleepDataResp);
       if (!points.length) {
         this.logger.info('No more historical points found');
@@ -326,13 +377,17 @@ export class SleeperScraper {
     }
     this.logger.info({ count: historicalTimeseries.length }, 'Historical points fetched');
 
-    return { metricsData: historicalTimeseries, googleSleepLogs };
+    return { metricsData: historicalTimeseries, ...allGoogleHealthLogs };
   }
 
   async getDailyData(startDate: Date): Promise<ScrapedSessions> {
     this.logger.info({ startDate }, 'Fetching daily sleep data');
     const dailyTimeseries: Timeseries[] = [];
-    const googleSleepLogs: google.health_v4.Schema$Sleep[] = [];
+    const allGoogleHealthLogs: GoogleHealthLogs = {
+      googleSleepLogs: [],
+      googleHeartRateLogs: [],
+      googleHeartRateVariabilityLogs: [],
+    };
     const today = new TZDate(new Date(), this.timezone);
     let date = new TZDate(startDate, this.timezone);
     while (date <= today) {
@@ -345,12 +400,17 @@ export class SleeperScraper {
         !!this.googleHealthApi, // Only fetch slices if we have Google Health configured
       );
       const timeseries = this.createTimeseries(sleepDataResp);
-      googleSleepLogs.push(...this.createGoogleSleepLogs(sleepDataResp));
+      const dayGoogleHealthLogs = this.createGoogleHealthLogs(sleepDataResp);
+      allGoogleHealthLogs.googleSleepLogs.push(...dayGoogleHealthLogs.googleSleepLogs);
+      allGoogleHealthLogs.googleHeartRateLogs.push(...dayGoogleHealthLogs.googleHeartRateLogs);
+      allGoogleHealthLogs.googleHeartRateVariabilityLogs.push(
+        ...dayGoogleHealthLogs.googleHeartRateVariabilityLogs,
+      );
       dailyTimeseries.push(...timeseries);
       date = addDays(date, 1);
     }
     this.logger.info({ count: dailyTimeseries.length }, 'Daily points fetched');
-    return { metricsData: dailyTimeseries, googleSleepLogs };
+    return { metricsData: dailyTimeseries, ...allGoogleHealthLogs };
   }
 
   async scrapeSleeperData(): Promise<void> {
@@ -402,10 +462,12 @@ export class SleeperScraper {
       scrapedSessions = await this.getHistoricalData();
     }
 
-    await this.publishSleepSessions(scrapedSessions.googleSleepLogs);
+    const { metricsData, ...googleHealthLogs } = scrapedSessions;
+
+    await this.publishGoogleSleepSessions(googleHealthLogs);
 
     this.logger.info(
-      { count: scrapedSessions.metricsData.length },
+      { count: metricsData.length },
       'Points scraped. Writing to metrics database...',
     );
     const remoteWriteConfig: Options = {
@@ -413,7 +475,7 @@ export class SleeperScraper {
       auth: config.victoriaMetricsAuth,
     };
     // eslint-disable-next-line no-restricted-syntax
-    for (const timeseries of scrapedSessions.metricsData) {
+    for (const timeseries of metricsData) {
       this.logger.trace(
         { metric: timeseries.labels.__name__, count: timeseries.samples.length },
         'Writing timeseries to Prometheus',
