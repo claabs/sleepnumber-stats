@@ -27,6 +27,12 @@ const sleepApi = new SleepNumberAPI({
   logger,
 });
 
+if (!config.googleRedirectUri) {
+  const err = new Error('googleRedirectUri must be set in config');
+  logger.error({ err });
+  throw err;
+}
+
 let sleepers: Sleeper[];
 try {
   const sleeperResp = await sleepApi.getSleeper();
@@ -65,11 +71,7 @@ googleHealthApp.get('/register/:sleeperId', (c) => {
   const sleeperId = c.req.param('sleeperId');
   const authorizeUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: [
-      'profile',
-      'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
-      'https://www.googleapis.com/auth/googlehealth.sleep.writeonly',
-    ],
+    scope: ['profile', 'https://www.googleapis.com/auth/googlehealth.sleep.writeonly'],
     state: sleeperId,
   });
   return c.redirect(authorizeUrl);
@@ -88,11 +90,18 @@ googleHealthApp.get('/callback', async (c) => {
     }
     await setGoogleRefreshToken(sleeperId, tokens.refresh_token);
 
+    logger.info({ sleeperId }, 'Successfully registered Google Health for sleeper');
     return c.text('Google Health authorization successful!');
   } catch (err) {
     logger.error({ err }, 'Error exchanging code for tokens');
     return c.text('Error exchanging code', 500);
   }
 });
+
+const { origin } = new URL(config.googleRedirectUri);
+logger.info(
+  { url: `${origin}/register` },
+  'Open this page to register a sleeper with Google Health',
+);
 
 serve({ fetch: googleHealthApp.fetch, port: config.port });

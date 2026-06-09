@@ -115,7 +115,7 @@ To enable the reporting of sleep data to your Google Health account (for syncing
     }
     ```
 
-1. Go to the [**Audience**](https://console.cloud.google.com/auth/audience) page, click  **Add users**, and enter the Google account email addresses of your test users.
+1. Go to the [**Audience**](https://console.cloud.google.com/auth/audience) page and click  **Publish app**
 1. Open a terminal inside your running container and run `./setup.sh`:
 
     ```sh
