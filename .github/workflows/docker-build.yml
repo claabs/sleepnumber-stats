@@ -11,6 +11,8 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   docker-build:
@@ -47,5 +49,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=${{ github.workflow }}
-          cache-to: type=gha,mode=max,scope=${{ github.workflow }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

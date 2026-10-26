@@ -8,8 +8,10 @@ ENV NODE_ENV=production CONFIG_PATH=/app/config
 
 # Install dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev \
-    && apk add --no-cache tzdata supercronic jq
+RUN --mount=type=cache,target=/var/cache/apk \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev \
+    && apk add --update-cache tzdata supercronic jq
 
 # Copy source code
 COPY . .
