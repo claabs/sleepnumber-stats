@@ -16,6 +16,7 @@ async function main() {
     const promQueryApi = new PrometheusDriver({
       endpoint: config.victoriaMetricsUrl,
       auth: config.victoriaMetricsAuth,
+      timeout: 5 * 60 * 1000, // 5 minutes
     });
 
     if (config.deleteMetrics) {
